@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	agenttool "github.com/S-zhi/blender-shot-preview/internal/agent/tool"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
 )
@@ -18,12 +19,12 @@ const (
 	maximumReadAttempts      = 3
 )
 
-type ToolKind string
+type ToolKind = agenttool.Kind
 
 const (
-	ToolKindRead         ToolKind = "read"
-	ToolKindWrite        ToolKind = "write"
-	ToolKindIrreversible ToolKind = "irreversible"
+	ToolKindRead         = agenttool.KindRead
+	ToolKindWrite        = agenttool.KindWrite
+	ToolKindIrreversible = agenttool.KindIrreversible
 )
 
 // ToolExecution contains the stable identifiers that a Skill passes to its

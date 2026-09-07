@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/S-zhi/blender-shot-preview/internal/agent/skill"
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/compose"
@@ -21,10 +22,10 @@ type AgentFactory interface {
 
 type EinoAgentFactory struct {
 	models ModelResolver
-	skills SkillRegistry
+	skills skill.Resolver
 }
 
-func NewEinoAgentFactory(models ModelResolver, skills SkillRegistry) (*EinoAgentFactory, error) {
+func NewEinoAgentFactory(models ModelResolver, skills skill.Resolver) (*EinoAgentFactory, error) {
 	if models == nil || skills == nil {
 		return nil, fmt.Errorf("%w: models and skills are required", ErrInvalidDefinition)
 	}
@@ -48,15 +49,13 @@ func (f *EinoAgentFactory) Build(ctx context.Context, definition AgentDefinition
 		if err != nil {
 			return nil, err
 		}
-		kind, err := f.skills.Kind(skillID)
-		if err != nil {
-			return nil, err
+		for _, entry := range resolved {
+			guarded, err := guard.wrap(entry.Tool, entry.Definition.Kind)
+			if err != nil {
+				return nil, fmt.Errorf("guard skill %q tool %q: %w", skillID, entry.Definition.ID, err)
+			}
+			tools = append(tools, guarded)
 		}
-		guarded, err := guard.wrap(resolved, kind)
-		if err != nil {
-			return nil, fmt.Errorf("guard skill %q: %w", skillID, err)
-		}
-		tools = append(tools, guarded)
 	}
 	agent, err := adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{
 		Name:          definition.ID,
