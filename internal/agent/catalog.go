@@ -17,14 +17,20 @@ const (
 	ShotDesignerAgentID  = "shot-designer-agent"
 	SceneAssemblyAgentID = "scene-assembly-agent"
 
-	ToolIDBlenderCreateAsset  = "blender.asset.create"
-	ToolIDBlenderInspectAsset = "blender.asset.inspect"
-	ToolIDPythonCreateAsset   = "python.asset.create"
-	ToolIDPythonInspectAsset  = "python.asset.inspect"
+	ToolIDAssetSearch            = "asset.search"
+	ToolIDAssetInspect           = "asset.inspect"
+	ToolIDBlenderCreateModel     = "blender.create_model"
+	ToolIDBlenderCreateMaterial  = "blender.create_material"
+	ToolIDBlenderCreateRig       = "blender.create_rig"
+	ToolIDBlenderImportReference = "blender.import_reference"
+	ToolIDBlenderInspectAsset    = "blender.inspect_asset"
 
-	ToolIDBlenderAssembleScene = "blender.scene.assemble"
-	ToolIDBlenderInspectScene  = "blender.scene.inspect"
-	ToolIDBlenderSaveScene     = "blender.scene.save"
+	ToolIDBlenderCreateProject   = "blender.create_project"
+	ToolIDBlenderImportAsset     = "blender.import_asset"
+	ToolIDBlenderApplyScenePatch = "blender.apply_scene_patch"
+	ToolIDBlenderApplyShotPlan   = "blender.apply_shot_plan"
+	ToolIDBlenderSaveProject     = "blender.save_project"
+	ToolIDBlenderInspectScene    = "blender.inspect_scene"
 )
 
 // Versioned contracts are embedded so deployed catalog definitions and their
@@ -99,7 +105,10 @@ func ProductionAgentDefinitions() []AgentDefinition {
 			ID: AssetCreatorAgentID, Name: "Asset Creator Agent",
 			Description:  "Creates and inspects one isolated Blender asset task, then returns an AssetManifest.",
 			SystemPrompt: skillInstruction(assetCreatorAgentSkill), ModelProfile: ProductionModelProfile,
-			SkillIDs:    []string{ToolIDBlenderCreateAsset, ToolIDBlenderInspectAsset, ToolIDPythonCreateAsset, ToolIDPythonInspectAsset},
+			SkillIDs: []string{
+				ToolIDAssetSearch, ToolIDBlenderImportReference, ToolIDBlenderCreateModel,
+				ToolIDBlenderCreateMaterial, ToolIDBlenderCreateRig, ToolIDBlenderInspectAsset,
+			},
 			InputSchema: cloneSchema(assetTaskSchema), OutputSchema: cloneSchema(assetManifestSchema),
 			MaxSteps: 28, MaxOutputTokens: 4096, Timeout: 15 * time.Minute, Status: AgentStatusEnabled,
 		},
@@ -114,7 +123,10 @@ func ProductionAgentDefinitions() []AgentDefinition {
 			ID: SceneAssemblyAgentID, Name: "Scene Assembly Agent",
 			Description:  "Assembles manifests and a ShotPlan into an editable Blender project.",
 			SystemPrompt: skillInstruction(sceneAssemblyAgentSkill), ModelProfile: ProductionModelProfile,
-			SkillIDs:    []string{ToolIDBlenderAssembleScene, ToolIDBlenderInspectScene, ToolIDBlenderSaveScene},
+			SkillIDs: []string{
+				ToolIDBlenderCreateProject, ToolIDBlenderImportAsset, ToolIDBlenderApplyScenePatch,
+				ToolIDBlenderApplyShotPlan, ToolIDBlenderSaveProject, ToolIDBlenderInspectScene,
+			},
 			InputSchema: cloneSchema(sceneAssemblyRequestSchema), OutputSchema: cloneSchema(sceneAssemblyResultSchema),
 			MaxSteps: 24, MaxOutputTokens: 4096, Timeout: 15 * time.Minute, Status: AgentStatusEnabled,
 		},

@@ -35,7 +35,10 @@ func TestProductionAgentDefinitions(t *testing.T) {
 		AssetCreatorAgentID: {
 			inputRequired: []string{"version", "task_id", "asset_id", "asset_kind", "description", "workspace", "output_path"}, outputRequired: []string{"version", "asset_id", "asset_kind", "source_files", "blend_file", "inspection"},
 			maxSteps: 28, maxTokens: 4096, timeout: 15 * time.Minute,
-			toolIDs: []string{ToolIDBlenderCreateAsset, ToolIDBlenderInspectAsset, ToolIDPythonCreateAsset, ToolIDPythonInspectAsset},
+			toolIDs: []string{
+				ToolIDAssetSearch, ToolIDBlenderImportReference, ToolIDBlenderCreateModel,
+				ToolIDBlenderCreateMaterial, ToolIDBlenderCreateRig, ToolIDBlenderInspectAsset,
+			},
 		},
 		ShotDesignerAgentID: {
 			inputRequired: []string{"scene_spec", "asset_manifests"}, outputRequired: []string{"version", "scene_id", "shots", "constraints"},
@@ -44,7 +47,10 @@ func TestProductionAgentDefinitions(t *testing.T) {
 		SceneAssemblyAgentID: {
 			inputRequired: []string{"asset_manifests", "shot_plan", "output_path"}, outputRequired: []string{"version", "scene_id", "blend_file", "inspection"},
 			maxSteps: 24, maxTokens: 4096, timeout: 15 * time.Minute,
-			toolIDs: []string{ToolIDBlenderAssembleScene, ToolIDBlenderInspectScene, ToolIDBlenderSaveScene},
+			toolIDs: []string{
+				ToolIDBlenderCreateProject, ToolIDBlenderImportAsset, ToolIDBlenderApplyScenePatch,
+				ToolIDBlenderApplyShotPlan, ToolIDBlenderSaveProject, ToolIDBlenderInspectScene,
+			},
 		},
 	}
 
