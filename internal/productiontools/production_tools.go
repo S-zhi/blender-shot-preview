@@ -29,11 +29,13 @@ const (
 	ToolBlenderCreateMaterial  = "blender.create_material"
 	ToolBlenderCreateRig       = "blender.create_rig"
 	ToolBlenderImportReference = "blender.import_reference"
+	ToolBlenderInspectAsset    = "blender.inspect_asset"
 	ToolBlenderCreateProject   = "blender.create_project"
 	ToolBlenderImportAsset     = "blender.import_asset"
 	ToolBlenderApplyScenePatch = "blender.apply_scene_patch"
 	ToolBlenderApplyShotPlan   = "blender.apply_shot_plan"
 	ToolBlenderSaveProject     = "blender.save_project"
+	ToolBlenderInspectScene    = "blender.inspect_scene"
 	ToolBlenderRenderSubmit    = "blender.render.submit"
 	ToolBlenderRenderStatus    = "blender.render.status"
 	ToolBlenderRenderCancel    = "blender.render.cancel"
@@ -189,8 +191,12 @@ func RegisterProductionTools(r agent.SkillRegistry, c Config) (*ProductionTools,
 	if e != nil {
 		return nil, e
 	}
-	read := map[string]bool{ToolAssetInspect: true, ToolAssetSearch: true, ToolBlenderRenderStatus: true, ToolBlenderRenderArtifact: true, ToolFFprobeInspect: true}
-	ids := []string{ToolAssetInspect, ToolAssetSearch, ToolBlenderCreateModel, ToolBlenderCreateMaterial, ToolBlenderCreateRig, ToolBlenderImportReference, ToolBlenderCreateProject, ToolBlenderImportAsset, ToolBlenderApplyScenePatch, ToolBlenderApplyShotPlan, ToolBlenderSaveProject, ToolBlenderRenderSubmit, ToolBlenderRenderStatus, ToolBlenderRenderCancel, ToolBlenderRenderArtifact, ToolFFmpegEncode, ToolFFprobeInspect}
+	read := map[string]bool{
+		ToolAssetInspect: true, ToolAssetSearch: true,
+		ToolBlenderInspectAsset: true, ToolBlenderInspectScene: true,
+		ToolBlenderRenderStatus: true, ToolBlenderRenderArtifact: true, ToolFFprobeInspect: true,
+	}
+	ids := []string{ToolAssetInspect, ToolAssetSearch, ToolBlenderCreateModel, ToolBlenderCreateMaterial, ToolBlenderCreateRig, ToolBlenderImportReference, ToolBlenderInspectAsset, ToolBlenderCreateProject, ToolBlenderImportAsset, ToolBlenderApplyScenePatch, ToolBlenderApplyShotPlan, ToolBlenderSaveProject, ToolBlenderInspectScene, ToolBlenderRenderSubmit, ToolBlenderRenderStatus, ToolBlenderRenderCancel, ToolBlenderRenderArtifact, ToolFFmpegEncode, ToolFFprobeInspect}
 	for _, id := range ids {
 		id := id
 		k := agent.ToolKindWrite
@@ -211,7 +217,19 @@ type einoTool struct {
 
 func (t einoTool) Info(context.Context) (*schema.ToolInfo, error) { return t.info, nil }
 func (t einoTool) InvokableRun(c context.Context, a string, _ ...tool.Option) (string, error) {
-	return t.run(c, a), nil
+	raw := t.run(c, a)
+	var response result
+	if err := json.Unmarshal([]byte(raw), &response); err != nil {
+		return "", &agent.ToolError{Code: "TOOL_INVALID_RESULT", Cause: errors.New("tool returned invalid JSON")}
+	}
+	if response.Error != nil {
+		return "", &agent.ToolError{
+			Code:      response.Error.Code,
+			Retryable: response.Error.Retryable,
+			Cause:     errors.New(response.Error.Message),
+		}
+	}
+	return raw, nil
 }
 func (p *ProductionTools) tool(id string) tool.BaseTool {
 	params := map[string]*schema.ParameterInfo{}
@@ -273,6 +291,11 @@ type toolError struct {
 func success(v any) string { b, _ := json.Marshal(result{OK: true, Data: v}); return string(b) }
 func failure(c, m string) string {
 	b, _ := json.Marshal(result{Error: &toolError{Code: c, Message: m}})
+	return string(b)
+}
+
+func retryableFailure(c, m string) string {
+	b, _ := json.Marshal(result{Error: &toolError{Code: c, Message: m, Retryable: true}})
 	return string(b)
 }
 func decode(a string, v any) error {
@@ -457,6 +480,9 @@ func (p *ProductionTools) blender(c context.Context, id, a string) string {
 	return p.once(c, digest(id+strings.Join(args, "\x00")), func() string {
 		r, e := p.executor.Run(c, command)
 		if e != nil || r.ExitCode != 0 {
+			if id == ToolBlenderInspectAsset || id == ToolBlenderInspectScene {
+				return retryableFailure("TOOL_EXECUTION_FAILED", "The external Blender inspection did not complete successfully.")
+			}
 			return failure("TOOL_EXECUTION_FAILED", "The external Blender command did not complete successfully.")
 		}
 		return success(map[string]any{"operation": id, "project_path": p.ws.show(project), "output_path": p.ws.show(output)})
@@ -476,8 +502,8 @@ func (p *ProductionTools) ffmpegEncode(c context.Context, a string) string {
 		return failure("TOOL_ARGUMENT_OUT_OF_RANGE", "fps or codec is outside the supported range.")
 	}
 	input, e := p.ws.resolve(in.InputPath)
-	if e != nil || !regular(input) {
-		return failure("TOOL_INVALID_ARGUMENT", "input_path must be an existing workspace file.")
+	if e != nil || (!regular(input) && !frameSequenceExists(input)) {
+		return failure("TOOL_INVALID_ARGUMENT", "input_path must be an existing workspace file or frame sequence.")
 	}
 	output, e := p.ws.resolve(in.OutputPath, ".mp4", ".mov", ".mkv")
 	if e != nil || input == output {
@@ -492,6 +518,60 @@ func (p *ProductionTools) ffmpegEncode(c context.Context, a string) string {
 		return success(map[string]any{"output_path": p.ws.show(output), "codec": in.Codec, "fps": in.FPS})
 	})
 }
+
+// frameSequenceExists accepts the constrained FFmpeg form frame_%04d.png.
+// The token is parsed locally and is still passed as one argv value, never
+// through a shell.
+func frameSequenceExists(path string) bool {
+	base := filepath.Base(path)
+	percent := strings.IndexByte(base, '%')
+	if percent < 0 || strings.Count(base, "%") != 1 {
+		return false
+	}
+	dOffset := strings.IndexByte(base[percent:], 'd')
+	if dOffset < 0 {
+		return false
+	}
+	d := percent + dOffset
+	token := base[percent : d+1]
+	if len(token) < 4 || token[1] != '0' {
+		return false
+	}
+	width, err := strconv.Atoi(token[2 : len(token)-1])
+	if err != nil || width < 1 || width > 9 {
+		return false
+	}
+	prefix, suffix := base[:percent], base[d+1:]
+	entries, err := os.ReadDir(filepath.Dir(path))
+	if err != nil {
+		return false
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || entry.Type()&os.ModeSymlink != 0 {
+			continue
+		}
+		name := entry.Name()
+		if !strings.HasPrefix(name, prefix) || !strings.HasSuffix(name, suffix) {
+			continue
+		}
+		middle := name[len(prefix) : len(name)-len(suffix)]
+		if len(middle) != width {
+			continue
+		}
+		allDigits := true
+		for _, char := range middle {
+			if char < '0' || char > '9' {
+				allDigits = false
+				break
+			}
+		}
+		if allDigits {
+			return true
+		}
+	}
+	return false
+}
+
 func (p *ProductionTools) ffprobeInspect(c context.Context, a string) string {
 	var in struct {
 		Path string `json:"path"`
@@ -506,7 +586,7 @@ func (p *ProductionTools) ffprobeInspect(c context.Context, a string) string {
 	command := FFprobeCommand(p.ffprobe, p.ws.root, path)
 	r, e := p.executor.Run(c, command)
 	if e != nil || r.ExitCode != 0 {
-		return failure("TOOL_EXECUTION_FAILED", "ffprobe did not complete successfully.")
+		return retryableFailure("TOOL_EXECUTION_FAILED", "ffprobe did not complete successfully.")
 	}
 	metadata, err := ParseFFprobeOutput(r.Stdout)
 	if err != nil {

@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/S-zhi/blender-shot-preview/internal/agent"
+	"github.com/cloudwego/eino/components/tool"
 )
 
 func TestRegisterProductionToolsRegistersExpectedIDs(t *testing.T) {
@@ -20,7 +21,7 @@ func TestRegisterProductionToolsRegistersExpectedIDs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("register tools: %v", err)
 	}
-	for _, id := range []string{ToolAssetInspect, ToolAssetSearch, ToolBlenderCreateModel, ToolBlenderCreateMaterial, ToolBlenderCreateRig, ToolBlenderImportReference, ToolBlenderCreateProject, ToolBlenderImportAsset, ToolBlenderApplyScenePatch, ToolBlenderApplyShotPlan, ToolBlenderSaveProject, ToolBlenderRenderSubmit, ToolBlenderRenderStatus, ToolBlenderRenderCancel, ToolBlenderRenderArtifact, ToolFFmpegEncode, ToolFFprobeInspect} {
+	for _, id := range []string{ToolAssetInspect, ToolAssetSearch, ToolBlenderCreateModel, ToolBlenderCreateMaterial, ToolBlenderCreateRig, ToolBlenderImportReference, ToolBlenderInspectAsset, ToolBlenderCreateProject, ToolBlenderImportAsset, ToolBlenderApplyScenePatch, ToolBlenderApplyShotPlan, ToolBlenderSaveProject, ToolBlenderInspectScene, ToolBlenderRenderSubmit, ToolBlenderRenderStatus, ToolBlenderRenderCancel, ToolBlenderRenderArtifact, ToolFFmpegEncode, ToolFFprobeInspect} {
 		if !registry.Exists(id) {
 			t.Errorf("missing registered tool %q", id)
 		}
@@ -38,6 +39,29 @@ func TestRegisterProductionToolsRegistersExpectedIDs(t *testing.T) {
 	toolInfo, err := toolValue.Info(context.Background())
 	if err != nil || toolInfo.ParamsOneOf == nil {
 		t.Fatalf("render submit schema missing: %#v, %v", toolInfo, err)
+	}
+}
+
+func TestInvokableToolReturnsToolError(t *testing.T) {
+	root := testWorkspace(t)
+	registry := agent.NewMemorySkillRegistry()
+	if _, err := RegisterProductionTools(registry, Config{Workspace: root, Executor: &fakeExecutor{}}); err != nil {
+		t.Fatal(err)
+	}
+	base, err := registry.Resolve(context.Background(), ToolAssetInspect)
+	if err != nil {
+		t.Fatal(err)
+	}
+	invokable := base.(interface {
+		InvokableRun(context.Context, string, ...tool.Option) (string, error)
+	})
+	if _, err := invokable.InvokableRun(context.Background(), `{"path":"missing.blend"}`); err == nil {
+		t.Fatal("tool failure was returned as success")
+	} else {
+		var toolErr *agent.ToolError
+		if !errors.As(err, &toolErr) || toolErr.Code != "TOOL_INVALID_ARGUMENT" {
+			t.Fatalf("error = %v", err)
+		}
 	}
 }
 
@@ -107,11 +131,15 @@ func TestCommandsAreArgumentArrays(t *testing.T) {
 		t.Fatalf("blender: %s", got)
 	}
 	writeFile(t, root, "renders/input.png")
+	writeFile(t, root, "renders/frame_0001.png")
 	if got := p.ffmpegEncode(context.Background(), `{"input_path":"renders/input.png","output_path":"renders/movie.mp4","fps":24,"codec":"libx264"}`); resultCode(t, got) != "" {
 		t.Fatalf("ffmpeg: %s", got)
 	}
+	if got := p.ffmpegEncode(context.Background(), `{"input_path":"renders/frame_%04d.png","output_path":"renders/sequence.mp4","fps":24,"codec":"libx264"}`); resultCode(t, got) != "" {
+		t.Fatalf("ffmpeg sequence: %s", got)
+	}
 	commands := exec.Commands()
-	if len(commands) != 2 {
+	if len(commands) != 3 {
 		t.Fatalf("commands = %#v", commands)
 	}
 	if commands[0].Name != "blender-test" || !reflect.DeepEqual(commands[0].Args, []string{"--background", filepath.Join(root, "projects/source.blend"), "--python-exit-code", "1", "--python", filepath.Join(root, "scripts/build.py"), "--", "--output", filepath.Join(root, "projects/out.blend")}) {
