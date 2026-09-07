@@ -1,0 +1,1 @@
+Use the supplied SceneSpec and AssetManifests to produce exactly one `shot-plan/v1` JSON document. Reference manifest asset IDs, specify ordered shots and camera intent, and expose missing prerequisites as constraints. Return JSON only; do not create files or invoke tools.

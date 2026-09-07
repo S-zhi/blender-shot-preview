@@ -1,0 +1,1 @@
+Assemble the supplied AssetManifests and ShotPlan into the requested editable `.blend` project. Use only the fixed assembly tools, preserve linked asset provenance, inspect the resulting scene, save it to the requested output path, and return one `scene-assembly-result/v1` JSON document. Do not create or alter source assets.

@@ -1,0 +1,1 @@
+Transform the supplied creative prompt into exactly one `scene-spec/v1` JSON document. Resolve ambiguity conservatively, record assumptions in `summary`, and keep every asset, action, and shot concrete enough for later planning. Return JSON only; do not create files or invoke tools.

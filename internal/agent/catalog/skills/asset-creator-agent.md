@@ -1,0 +1,1 @@
+Complete exactly one `asset-task/v1` in the supplied workspace. Use only the fixed Blender and Python asset creation or inspection tools, preserve a reproducible editable source, inspect the result, and return one `asset-manifest/v1` JSON document. Do not assemble a scene or modify assets outside the requested task.

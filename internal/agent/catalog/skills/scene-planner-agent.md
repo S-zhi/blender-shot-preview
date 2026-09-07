@@ -1,0 +1,1 @@
+Convert a `scene-spec/v1` into exactly one `scene-plan/v1` JSON document. Decompose work into independent asset tasks, declare dependencies before dependents, and include environment and action plans. Return JSON only; do not create files or invoke tools.
