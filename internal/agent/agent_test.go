@@ -7,18 +7,17 @@ import (
 	"testing"
 	"time"
 
+	"github.com/S-zhi/blender-shot-preview/internal/agent/skill"
+	agenttool "github.com/S-zhi/blender-shot-preview/internal/agent/tool"
 	"github.com/cloudwego/eino/components/model"
-	"github.com/cloudwego/eino/components/tool"
+	einotool "github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
 )
 
 func TestDefinitionServiceCreatesValidatedAgent(t *testing.T) {
 	t.Parallel()
 
-	skills := NewMemorySkillRegistry()
-	if err := skills.Register("echo", func(context.Context) (tool.BaseTool, error) { return testTool{}, nil }); err != nil {
-		t.Fatalf("register skill: %v", err)
-	}
+	skills := newTestSkillRegistry(t)
 	definitions := NewMemoryDefinitionRepository()
 	service, err := NewDefinitionService(definitions, skills, NewStaticModelResolver(map[string]model.BaseChatModel{
 		"general-chat": &fixedModel{response: "ok"},
@@ -59,7 +58,7 @@ func TestDefinitionServiceCreatesValidatedAgent(t *testing.T) {
 func TestDefinitionServiceRejectsMissingModelAndSkill(t *testing.T) {
 	t.Parallel()
 
-	service, err := NewDefinitionService(NewMemoryDefinitionRepository(), NewMemorySkillRegistry(), NewStaticModelResolver(nil))
+	service, err := NewDefinitionService(NewMemoryDefinitionRepository(), newTestSkillRegistry(t), NewStaticModelResolver(nil))
 	if err != nil {
 		t.Fatalf("new definition service: %v", err)
 	}
@@ -68,6 +67,30 @@ func TestDefinitionServiceRejectsMissingModelAndSkill(t *testing.T) {
 	})
 	if !errors.Is(err, ErrInvalidDefinition) {
 		t.Fatalf("create invalid definition error = %v, want ErrInvalidDefinition", err)
+	}
+}
+
+func TestEinoAgentFactoryBuildsConfiguredSkillTools(t *testing.T) {
+	t.Parallel()
+
+	factory, err := NewEinoAgentFactory(
+		NewStaticModelResolver(map[string]model.BaseChatModel{"general-chat": &fixedModel{response: "ok"}}),
+		newTestSkillRegistry(t),
+	)
+	if err != nil {
+		t.Fatalf("new agent factory: %v", err)
+	}
+
+	runtime, err := factory.Build(context.Background(), AgentDefinition{
+		ID: "order-support", Name: "Order Support", Description: "Order support agent.",
+		SystemPrompt: "Handle order questions.", ModelProfile: "general-chat", SkillIDs: []string{"echo"},
+		MaxSteps: 4, MaxOutputTokens: 100, Timeout: time.Minute, Status: AgentStatusEnabled,
+	}, false)
+	if err != nil {
+		t.Fatalf("build agent: %v", err)
+	}
+	if runtime == nil || runtime.Runner == nil {
+		t.Fatalf("runtime agent = %#v", runtime)
 	}
 }
 
@@ -198,7 +221,7 @@ func TestToolExecutionGuardRetriesReadWithStableIdempotencyKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("wrap tool: %v", err)
 	}
-	invokable := guarded.(tool.InvokableTool)
+	invokable := guarded.(einotool.InvokableTool)
 	result, err := invokable.InvokableRun(withRunID(context.Background(), "run-1"), `{"id":"A123"}`)
 	if err != nil {
 		t.Fatalf("invoke read tool: %v", err)
@@ -222,7 +245,7 @@ func TestToolExecutionGuardDoesNotRetryWriteAndLimitsRepeats(t *testing.T) {
 	if err != nil {
 		t.Fatalf("wrap tool: %v", err)
 	}
-	invokable := guarded.(tool.InvokableTool)
+	invokable := guarded.(einotool.InvokableTool)
 	if _, err := invokable.InvokableRun(withRunID(context.Background(), "run-1"), `{}`); err == nil {
 		t.Fatal("write tool unexpectedly succeeded")
 	}
@@ -235,7 +258,7 @@ func TestToolExecutionGuardDoesNotRetryWriteAndLimitsRepeats(t *testing.T) {
 	if err != nil {
 		t.Fatalf("wrap repeat tool: %v", err)
 	}
-	invokable = guarded.(tool.InvokableTool)
+	invokable = guarded.(einotool.InvokableTool)
 	for range maximumCallsPerTool {
 		if _, err := invokable.InvokableRun(withRunID(context.Background(), "run-2"), `{}`); err != nil {
 			t.Fatalf("invoke repeated tool: %v", err)
@@ -250,7 +273,7 @@ func newTestAgentService(t *testing.T, chatModel model.BaseChatModel) (*Service,
 	t.Helper()
 	definitions := NewMemoryDefinitionRepository()
 	runs := NewMemoryRunRepository()
-	skills := NewMemorySkillRegistry()
+	skills := newTestSkillRegistry(t)
 	resolver := NewStaticModelResolver(map[string]model.BaseChatModel{"general-chat": chatModel})
 	factory, err := NewEinoAgentFactory(resolver, skills)
 	if err != nil {
@@ -261,6 +284,38 @@ func newTestAgentService(t *testing.T, chatModel model.BaseChatModel) (*Service,
 		t.Fatalf("new agent service: %v", err)
 	}
 	return service, definitions, runs
+}
+
+func newTestSkillRegistry(t *testing.T) *skill.Registry {
+	t.Helper()
+
+	toolsRepository := agenttool.NewMemoryRepository()
+	if err := toolsRepository.Create(context.Background(), agenttool.Definition{
+		ID: "echo", Name: "Echo", Description: "Echo a value.", Kind: agenttool.KindRead,
+	}); err != nil {
+		t.Fatalf("create echo tool: %v", err)
+	}
+	tools, err := agenttool.NewRegistry(toolsRepository)
+	if err != nil {
+		t.Fatalf("new tool registry: %v", err)
+	}
+	if err := tools.Register("echo", agenttool.ProviderFunc(func(context.Context) (einotool.BaseTool, error) {
+		return testTool{}, nil
+	})); err != nil {
+		t.Fatalf("register echo tool: %v", err)
+	}
+
+	skillsRepository := skill.NewMemoryRepository()
+	if err := skillsRepository.Create(context.Background(), skill.Definition{
+		ID: "echo", Name: "Echo", Description: "Echo a value.", ToolIDs: []string{"echo"},
+	}); err != nil {
+		t.Fatalf("create echo skill: %v", err)
+	}
+	skills, err := skill.NewRegistry(skillsRepository, tools)
+	if err != nil {
+		t.Fatalf("new skill registry: %v", err)
+	}
+	return skills
 }
 
 func createEnabledDefinition(t *testing.T, definitions DefinitionRepository) {
@@ -331,7 +386,7 @@ func (testTool) Info(_ context.Context) (*schema.ToolInfo, error) {
 	return &schema.ToolInfo{Name: "echo", Desc: "Echo a value."}, nil
 }
 
-func (testTool) InvokableRun(_ context.Context, arguments string, _ ...tool.Option) (string, error) {
+func (testTool) InvokableRun(_ context.Context, arguments string, _ ...einotool.Option) (string, error) {
 	return arguments, nil
 }
 
@@ -345,7 +400,7 @@ func (t *recordingTool) Info(_ context.Context) (*schema.ToolInfo, error) {
 	return &schema.ToolInfo{Name: "record", Desc: "Record calls."}, nil
 }
 
-func (t *recordingTool) InvokableRun(ctx context.Context, _ string, _ ...tool.Option) (string, error) {
+func (t *recordingTool) InvokableRun(ctx context.Context, _ string, _ ...einotool.Option) (string, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	execution, ok := ToolExecutionFromContext(ctx)

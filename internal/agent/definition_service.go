@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/S-zhi/blender-shot-preview/internal/agent/skill"
 )
 
 const (
@@ -28,12 +30,12 @@ type AgentDefinitionService interface {
 
 type DefinitionService struct {
 	repository DefinitionRepository
-	skills     SkillRegistry
+	skills     skill.Resolver
 	models     ModelResolver
 	now        func() time.Time
 }
 
-func NewDefinitionService(repository DefinitionRepository, skills SkillRegistry, models ModelResolver) (*DefinitionService, error) {
+func NewDefinitionService(repository DefinitionRepository, skills skill.Resolver, models ModelResolver) (*DefinitionService, error) {
 	if repository == nil || skills == nil || models == nil {
 		return nil, fmt.Errorf("%w: repository, skills, and models are required", ErrInvalidDefinition)
 	}
@@ -120,7 +122,7 @@ func (s *DefinitionService) validate(ctx context.Context, definition *AgentDefin
 	}
 	definition.SkillIDs = uniqueTrimmed(definition.SkillIDs)
 	for _, skillID := range definition.SkillIDs {
-		if !s.skills.Exists(skillID) {
+		if !s.skills.Exists(ctx, skillID) {
 			return fmt.Errorf("%w: %s", ErrSkillNotFound, skillID)
 		}
 	}
