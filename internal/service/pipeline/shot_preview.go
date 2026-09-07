@@ -24,17 +24,19 @@ const (
 func ShotPreviewWorkflow(initialInput json.RawMessage) Workflow {
 	return Workflow{Nodes: []NodeSpec{
 		stageNode(NodeInitialize, nil, initialInput),
-		stageNode(NodeIntent, []NodeID{NodeInitialize}, nil),
+		agentNode(NodeIntent, []NodeID{NodeInitialize}, "intent-agent"),
 		stageNode(NodeValidateSpec, []NodeID{NodeIntent}, nil),
-		stageNode(NodeScenePlan, []NodeID{NodeValidateSpec}, nil),
+		agentNode(NodeScenePlan, []NodeID{NodeValidateSpec}, "scene-planner-agent"),
+		// CreateAssets is a deterministic fan-out coordinator. It invokes one
+		// asset-creator-agent run per planned asset and joins the manifests.
 		stageNode(NodeCreateAssets, []NodeID{NodeScenePlan}, nil),
-		stageNode(NodeDesignShots, []NodeID{NodeScenePlan}, nil),
-		stageNode(NodeAssembleScene, []NodeID{NodeCreateAssets, NodeDesignShots}, nil),
-		stageNode(NodePreviewRender, []NodeID{NodeAssembleScene}, nil),
+		agentNode(NodeDesignShots, []NodeID{NodeScenePlan}, "shot-designer-agent"),
+		agentNode(NodeAssembleScene, []NodeID{NodeCreateAssets, NodeDesignShots}, "scene-assembly-agent"),
+		toolNode(NodePreviewRender, []NodeID{NodeAssembleScene}, "blender.render.submit"),
 		stageNode(NodeInspect, []NodeID{NodePreviewRender}, nil),
-		stageNode(NodeFinalRender, []NodeID{NodeInspect}, nil),
-		stageNode(NodeEncode, []NodeID{NodeFinalRender}, nil),
-		stageNode(NodeVerify, []NodeID{NodeEncode}, nil),
+		toolNode(NodeFinalRender, []NodeID{NodeInspect}, "blender.render.submit"),
+		toolNode(NodeEncode, []NodeID{NodeFinalRender}, "ffmpeg.encode"),
+		toolNode(NodeVerify, []NodeID{NodeEncode}, "ffprobe.inspect"),
 		stageNode(NodePublish, []NodeID{NodeVerify}, nil),
 	}}
 }
@@ -43,5 +45,19 @@ func stageNode(id NodeID, dependencies []NodeID, input json.RawMessage) NodeSpec
 	return NodeSpec{
 		ID: id, DependsOn: dependencies, Input: input,
 		Invocation: Invocation{Kind: InvocationStep, Target: string(id)},
+	}
+}
+
+func agentNode(id NodeID, dependencies []NodeID, agentID string) NodeSpec {
+	return NodeSpec{
+		ID: id, DependsOn: dependencies,
+		Invocation: Invocation{Kind: InvocationAgent, Target: agentID},
+	}
+}
+
+func toolNode(id NodeID, dependencies []NodeID, toolID string) NodeSpec {
+	return NodeSpec{
+		ID: id, DependsOn: dependencies,
+		Invocation: Invocation{Kind: InvocationTool, Target: toolID},
 	}
 }

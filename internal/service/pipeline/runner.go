@@ -213,9 +213,16 @@ func (r *Runner) Recover(ctx context.Context) error {
 			changed := false
 			for index := range current.Nodes {
 				if current.Nodes[index].Status == NodeStatusRunning {
-					current.Nodes[index].Status = NodeStatusPending
-					current.Nodes[index].StartedAt = nil
-					current.Nodes[index].FinishedAt = nil
+					if current.Nodes[index].Attempts >= current.Nodes[index].MaxAttempts {
+						now := r.now().UTC()
+						current.Nodes[index].Status = NodeStatusFailed
+						current.Nodes[index].Error = "interrupted during final allowed attempt"
+						current.Nodes[index].FinishedAt = timePointer(now)
+					} else {
+						current.Nodes[index].Status = NodeStatusPending
+						current.Nodes[index].StartedAt = nil
+						current.Nodes[index].FinishedAt = nil
+					}
 					changed = true
 				}
 			}
@@ -247,11 +254,15 @@ func (r *Runner) start(taskID string) {
 	r.active[taskID] = execution{cancel: cancel}
 	r.mu.Unlock()
 	go func() {
+		recheck := false
 		defer func() {
 			cancel()
 			r.mu.Lock()
 			delete(r.active, taskID)
 			r.mu.Unlock()
+			if !recheck {
+				return
+			}
 			// A manual retry can change a failed task back to pending while this
 			// worker is between its final status read and active-map cleanup.
 			// Re-check after releasing the active slot so that retry is never lost.
@@ -259,49 +270,62 @@ func (r *Runner) start(taskID string) {
 				r.start(taskID)
 			}
 		}()
-		r.run(ctx, taskID)
+		recheck = r.run(ctx, taskID)
 	}()
 }
 
-func (r *Runner) run(ctx context.Context, taskID string) {
+// run requests one final state check only when it observed a terminal task.
+// Repository errors stop the worker without a hot restart loop; Recover can
+// retry the persisted in-flight state once storage is healthy again.
+func (r *Runner) run(ctx context.Context, taskID string) bool {
 	for {
 		task, err := r.Get(context.Background(), taskID)
-		if err != nil || task.Status.Terminal() {
-			return
+		if err != nil {
+			return false
+		}
+		if task.Status.Terminal() {
+			return true
 		}
 		if task.CancelRequested || ctx.Err() != nil {
-			return
+			return false
 		}
 		if task.Status == TaskStatusPending {
 			if err := r.setTaskRunning(taskID); err != nil {
-				return
+				return false
 			}
 			continue
 		}
 		ready := readyNodes(task)
 		if len(ready) == 0 {
 			if err := r.completeIfBlocked(taskID); err != nil {
-				return
+				return false
 			}
 			continue
 		}
 		started, err := r.startNodes(taskID, ready)
 		if err != nil || len(started) == 0 {
 			if err != nil {
-				return
+				return false
 			}
 			continue
 		}
 		var wait sync.WaitGroup
+		persistErrors := make(chan error, len(started))
 		for _, node := range started {
 			node := node
 			wait.Add(1)
 			go func() {
 				defer wait.Done()
-				r.executeNode(ctx, taskID, node)
+				if err := r.executeNode(ctx, taskID, node); err != nil {
+					persistErrors <- err
+				}
 			}()
 		}
 		wait.Wait()
+		close(persistErrors)
+		if len(persistErrors) > 0 {
+			return false
+		}
 	}
 }
 
@@ -345,13 +369,13 @@ func (r *Runner) startNodes(taskID string, ready []NodeID) ([]Node, error) {
 	return started, err
 }
 
-func (r *Runner) executeNode(ctx context.Context, taskID string, node Node) {
+func (r *Runner) executeNode(ctx context.Context, taskID string, node Node) error {
 	task, err := r.Get(context.Background(), taskID)
 	if err != nil {
-		return
+		return err
 	}
 	output, invokeErr := r.invoke(ctx, task, node)
-	r.finishNode(taskID, node.ID, output, invokeErr)
+	return r.finishNode(taskID, node.ID, output, invokeErr)
 }
 
 func (r *Runner) invoke(ctx context.Context, task Task, node Node) (Snapshot, error) {
@@ -389,8 +413,8 @@ func (r *Runner) invoke(ctx context.Context, task Task, node Node) (Snapshot, er
 	return snapshot, nil
 }
 
-func (r *Runner) finishNode(taskID string, nodeID NodeID, output Snapshot, invokeErr error) {
-	_ = r.withTask(taskID, func(task *Task) error {
+func (r *Runner) finishNode(taskID string, nodeID NodeID, output Snapshot, invokeErr error) error {
+	return r.withTask(taskID, func(task *Task) error {
 		if task.CancelRequested || task.Status.Terminal() {
 			return nil
 		}

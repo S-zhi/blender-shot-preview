@@ -2,15 +2,14 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"strings"
-	"sync"
 
 	"github.com/S-zhi/blender-shot-preview/internal/service/pipeline"
 )
 
 var ErrRejected = errors.New("shot preview task rejected")
+var ErrPipelineUnavailable = errors.New("shot preview pipeline is unavailable")
 
 type TaskStatus int
 
@@ -24,10 +23,8 @@ type ShotPreviewService interface {
 }
 
 // ShotPreviewServiceImpl preserves the RPC service boundary while delegating
-// asynchronous production to pipeline.Runner. Its zero value remains usable so
-// existing server wiring can be upgraded without changing handler contracts.
+// asynchronous production to a fully configured pipeline.Runner.
 type ShotPreviewServiceImpl struct {
-	once   sync.Once
 	runner *pipeline.Runner
 }
 
@@ -42,6 +39,9 @@ func (s *ShotPreviewServiceImpl) SubmitTask(ctx context.Context, userID, prompt,
 	if userID == "" || prompt == "" || requestID == "" {
 		return "", TaskStatusRejected, ErrRejected
 	}
+	if s == nil || s.runner == nil {
+		return "", TaskStatusRejected, ErrPipelineUnavailable
+	}
 
 	input, err := pipeline.NewSnapshot(shotPreviewInput{
 		UserID:         userID,
@@ -52,7 +52,7 @@ func (s *ShotPreviewServiceImpl) SubmitTask(ctx context.Context, userID, prompt,
 	if err != nil {
 		return "", TaskStatusRejected, err
 	}
-	task, _, err := s.pipeline().Submit(ctx, pipeline.Submission{
+	task, _, err := s.runner.Submit(ctx, pipeline.Submission{
 		IdempotencyKey: userID + ":" + requestID,
 		Input:          input,
 		Workflow:       pipeline.ShotPreviewWorkflow(input.JSON),
@@ -63,25 +63,13 @@ func (s *ShotPreviewServiceImpl) SubmitTask(ctx context.Context, userID, prompt,
 	return task.ID, TaskStatusAccepted, nil
 }
 
-func (s *ShotPreviewServiceImpl) pipeline() *pipeline.Runner {
-	s.once.Do(func() {
-		if s.runner != nil {
-			return
-		}
-		s.runner = pipeline.NewRunner(
-			pipeline.NewMemoryRepository(),
-			nil,
-			pipeline.StepInvokerFunc(defaultStage),
-			nil,
-		)
-	})
-	return s.runner
-}
-
 // Pipeline exposes the runner for bootstrap recovery and future task-status
 // endpoints without widening the existing RPC interface.
 func (s *ShotPreviewServiceImpl) Pipeline() *pipeline.Runner {
-	return s.pipeline()
+	if s == nil {
+		return nil
+	}
+	return s.runner
 }
 
 type shotPreviewInput struct {
@@ -89,10 +77,4 @@ type shotPreviewInput struct {
 	Prompt         string `json:"prompt"`
 	ConversationID string `json:"conversation_id,omitempty"`
 	RequestID      string `json:"request_id"`
-}
-
-func defaultStage(_ context.Context, request pipeline.StepRequest) (json.RawMessage, error) {
-	return json.Marshal(struct {
-		Stage string `json:"stage"`
-	}{Stage: request.Step})
 }

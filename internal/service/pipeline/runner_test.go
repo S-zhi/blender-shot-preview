@@ -111,6 +111,23 @@ func TestRunnerDeduplicatesIdempotentSubmission(t *testing.T) {
 	}
 }
 
+func TestRunnerRejectsIdempotencyKeyWithDifferentInput(t *testing.T) {
+	runner := NewRunner(NewMemoryRepository(), nil, StepInvokerFunc(func(context.Context, StepRequest) (json.RawMessage, error) {
+		return json.RawMessage(`{"ok":true}`), nil
+	}), nil)
+	workflow := Workflow{Nodes: []NodeSpec{stepNode("only", nil, 1)}}
+	if _, _, err := runner.Submit(context.Background(), Submission{
+		IdempotencyKey: "same-request", Input: snapshot(t, map[string]string{"request": "one"}), Workflow: workflow,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := runner.Submit(context.Background(), Submission{
+		IdempotencyKey: "same-request", Input: snapshot(t, map[string]string{"request": "different"}), Workflow: workflow,
+	}); !errors.Is(err, ErrIdempotencyConflict) {
+		t.Fatalf("error = %v, want ErrIdempotencyConflict", err)
+	}
+}
+
 func TestRunnerRetriesFailedNode(t *testing.T) {
 	var mu sync.Mutex
 	calls := 0
@@ -241,6 +258,107 @@ func TestRunnerRecoversPersistedRunningNode(t *testing.T) {
 	}
 }
 
+func TestRunnerDoesNotRecoverPastAttemptLimit(t *testing.T) {
+	repository := NewMemoryRepository()
+	input := snapshot(t, map[string]string{"request": "recover"})
+	now := time.Now().UTC()
+	_, _, err := repository.CreateIfAbsent(context.Background(), Task{
+		ID: "exhausted", IdempotencyKey: "exhausted", Input: input, Status: TaskStatusRunning,
+		CreatedAt: now, UpdatedAt: now,
+		Nodes: []Node{{
+			ID: "interrupted", Invocation: Invocation{Kind: InvocationStep, Target: "test"},
+			Input: input, Status: NodeStatusRunning, Attempts: 1, MaxAttempts: 1, StartedAt: &now,
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	runner := NewRunner(repository, nil, StepInvokerFunc(func(context.Context, StepRequest) (json.RawMessage, error) {
+		calls++
+		return json.RawMessage(`{"unexpected":true}`), nil
+	}), nil)
+	if err := runner.Recover(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	failed := waitForTask(t, runner, "exhausted", func(task Task) bool { return task.Status == TaskStatusFailed })
+	node, _ := failed.Node("interrupted")
+	if calls != 0 || node.Attempts != 1 || node.Status != NodeStatusFailed {
+		t.Fatalf("calls=%d node=%#v", calls, node)
+	}
+}
+
+func TestRunnerStopsWorkerWhenNodeResultCannotBePersisted(t *testing.T) {
+	base := NewMemoryRepository()
+	repository := &failNthUpdateRepository{Repository: base, failAt: 3}
+	invoked := make(chan struct{})
+	release := make(chan struct{})
+	runner := NewRunner(repository, nil, StepInvokerFunc(func(context.Context, StepRequest) (json.RawMessage, error) {
+		close(invoked)
+		<-release
+		return json.RawMessage(`{"ok":true}`), nil
+	}), nil)
+	task, _, err := runner.Submit(context.Background(), Submission{
+		IdempotencyKey: "persistence-failure",
+		Input:          snapshot(t, map[string]string{"request": "persist"}),
+		Workflow:       Workflow{Nodes: []NodeSpec{stepNode("only", nil, 1)}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-invoked:
+	case <-time.After(time.Second):
+		t.Fatal("node was not invoked")
+	}
+	close(release)
+	deadline := time.Now().Add(time.Second)
+	for runner.isActive(task.ID) && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if runner.isActive(task.ID) {
+		t.Fatal("worker remained active after persistence failure")
+	}
+	if updates := repository.updateCount(); updates != 3 {
+		t.Fatalf("repository updates = %d, want 3 without restart loop", updates)
+	}
+	stored, err := base.Get(context.Background(), task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	node, _ := stored.Node("only")
+	if node.Status != NodeStatusRunning {
+		t.Fatalf("node status = %s, want persisted in-flight state for recovery", node.Status)
+	}
+}
+
+func TestShotPreviewWorkflowUsesAgentsAndTools(t *testing.T) {
+	workflow := ShotPreviewWorkflow(json.RawMessage(`{"prompt":"shot"}`))
+	want := map[NodeID]Invocation{
+		NodeIntent:        {Kind: InvocationAgent, Target: "intent-agent"},
+		NodeScenePlan:     {Kind: InvocationAgent, Target: "scene-planner-agent"},
+		NodeDesignShots:   {Kind: InvocationAgent, Target: "shot-designer-agent"},
+		NodeAssembleScene: {Kind: InvocationAgent, Target: "scene-assembly-agent"},
+		NodePreviewRender: {Kind: InvocationTool, Target: "blender.render.submit"},
+		NodeFinalRender:   {Kind: InvocationTool, Target: "blender.render.submit"},
+		NodeEncode:        {Kind: InvocationTool, Target: "ffmpeg.encode"},
+		NodeVerify:        {Kind: InvocationTool, Target: "ffprobe.inspect"},
+	}
+	for _, node := range workflow.Nodes {
+		invocation, ok := want[node.ID]
+		if !ok {
+			continue
+		}
+		if node.Invocation != invocation {
+			t.Errorf("%s invocation = %#v, want %#v", node.ID, node.Invocation, invocation)
+		}
+		delete(want, node.ID)
+	}
+	if len(want) != 0 {
+		t.Fatalf("workflow is missing invocation nodes: %#v", want)
+	}
+}
+
 func stepNode(id NodeID, dependencies []NodeID, attempts int) NodeSpec {
 	return NodeSpec{
 		ID: id, DependsOn: dependencies, MaxAttempts: attempts,
@@ -273,4 +391,28 @@ func waitForTask(t *testing.T, runner *Runner, taskID string, predicate func(Tas
 	task, err := runner.Get(context.Background(), taskID)
 	t.Fatalf("task %q did not reach expected state, last=%#v err=%v", taskID, task, err)
 	return Task{}
+}
+
+type failNthUpdateRepository struct {
+	Repository
+	mu      sync.Mutex
+	updates int
+	failAt  int
+}
+
+func (r *failNthUpdateRepository) Update(ctx context.Context, task Task) error {
+	r.mu.Lock()
+	r.updates++
+	current := r.updates
+	r.mu.Unlock()
+	if current == r.failAt {
+		return errors.New("injected repository failure")
+	}
+	return r.Repository.Update(ctx, task)
+}
+
+func (r *failNthUpdateRepository) updateCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.updates
 }

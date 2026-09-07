@@ -16,6 +16,7 @@ var (
 	ErrTaskNotFound        = errors.New("pipeline task not found")
 	ErrInvalidWorkflow     = errors.New("invalid pipeline workflow")
 	ErrInvalidSubmission   = errors.New("invalid pipeline submission")
+	ErrIdempotencyConflict = errors.New("pipeline idempotency conflict")
 	ErrTaskNotFailed       = errors.New("pipeline task is not failed")
 	ErrTaskAlreadyTerminal = errors.New("pipeline task is already terminal")
 	ErrMissingInvoker      = errors.New("pipeline node invoker is not configured")

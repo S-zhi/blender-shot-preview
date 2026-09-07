@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"bytes"
 	"context"
 	"sort"
 	"sync"
@@ -34,7 +35,11 @@ func (r *MemoryRepository) CreateIfAbsent(_ context.Context, task Task) (Task, b
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if taskID, exists := r.byIdempotencyKey[task.IdempotencyKey]; exists {
-		return cloneTask(r.tasks[taskID]), false, nil
+		existing := r.tasks[taskID]
+		if !bytes.Equal(existing.Input.JSON, task.Input.JSON) {
+			return Task{}, false, ErrIdempotencyConflict
+		}
+		return cloneTask(existing), false, nil
 	}
 	r.tasks[task.ID] = cloneTask(task)
 	r.byIdempotencyKey[task.IdempotencyKey] = task.ID

@@ -12,11 +12,15 @@ import (
 func TestShotPreviewServiceSubmitsIdempotentAsyncPipeline(t *testing.T) {
 	runner := pipeline.NewRunner(
 		pipeline.NewMemoryRepository(),
-		nil,
+		pipeline.AgentInvokerFunc(func(_ context.Context, request pipeline.AgentRequest) (json.RawMessage, error) {
+			return json.Marshal(map[string]string{"agent": request.AgentID})
+		}),
 		pipeline.StepInvokerFunc(func(_ context.Context, request pipeline.StepRequest) (json.RawMessage, error) {
 			return json.Marshal(map[string]string{"stage": request.Step})
 		}),
-		nil,
+		pipeline.ToolInvokerFunc(func(_ context.Context, request pipeline.ToolRequest) (json.RawMessage, error) {
+			return json.Marshal(map[string]string{"tool": request.Tool})
+		}),
 	)
 	service := NewShotPreviewService(runner)
 	firstID, firstStatus, err := service.SubmitTask(context.Background(), "user-1", "A moonlit city shot", "conversation-1", "request-1")
@@ -40,6 +44,13 @@ func TestShotPreviewServiceRejectsIncompleteTask(t *testing.T) {
 	}
 	if _, status, err := service.SubmitTask(context.Background(), "user-1", "shot", "", ""); err != ErrRejected || status != TaskStatusRejected {
 		t.Fatalf("empty request ID result = status=%v err=%v", status, err)
+	}
+}
+
+func TestShotPreviewServiceRejectsUnavailablePipeline(t *testing.T) {
+	service := NewShotPreviewService(nil)
+	if _, status, err := service.SubmitTask(context.Background(), "user-1", "shot", "", "request-1"); err != ErrPipelineUnavailable || status != TaskStatusRejected {
+		t.Fatalf("unavailable pipeline result = status=%v err=%v", status, err)
 	}
 }
 
