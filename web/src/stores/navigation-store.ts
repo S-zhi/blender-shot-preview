@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-export type ActiveView = "home" | "chat" | "automate" | "custom" | "templates";
+export type ActiveView = "chat" | "assets" | "settings";
 
 interface NavigationState {
   activeView: ActiveView;
@@ -8,6 +8,7 @@ interface NavigationState {
 }
 
 export const useNavigationStore = create<NavigationState>((set) => ({
-  activeView: "home",
+  // Default entry: directly enters "chat" (新建对话) as requested
+  activeView: "chat",
   setActiveView: (activeView) => set({ activeView }),
 }));
