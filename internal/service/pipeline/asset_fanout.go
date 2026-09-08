@@ -60,7 +60,8 @@ func (s AssetFanOutStep) InvokeStep(ctx context.Context, request StepRequest) (j
 				}
 				output, err := s.Agents.InvokeAgent(ctx, AgentRequest{
 					TaskID: request.TaskID, NodeID: NodeID(fmt.Sprintf("%s-%d", NodeCreateAssets, index+1)),
-					AgentID: AssetCreatorAgentID, Attempt: request.Attempt, Input: input,
+					AgentID: AssetCreatorAgentID, Attempt: request.Attempt,
+					TaskInput: cloneSnapshot(request.TaskInput), Input: input,
 				})
 				if err != nil {
 					select {

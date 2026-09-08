@@ -62,7 +62,9 @@ func NewRenderManager(workspaceRoot, blender string, exec CommandExecutor) (*Ren
 }
 
 func (m *RenderJobManager) Submit(ctx context.Context, project, output string, first, last int) (RenderJob, error) {
-	if err := ctx.Err(); err != nil { return RenderJob{}, err }
+	if err := ctx.Err(); err != nil {
+		return RenderJob{}, err
+	}
 	id := newRenderID()
 	started := time.Now().UTC()
 	// The Eino guard cancels the short submit call after this method returns.

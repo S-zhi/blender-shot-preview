@@ -30,11 +30,11 @@ func ShotPreviewWorkflow(initialInput json.RawMessage) Workflow {
 		// CreateAssets is a deterministic fan-out coordinator. It invokes one
 		// asset-creator-agent run per planned asset and joins the manifests.
 		stageNode(NodeCreateAssets, []NodeID{NodeScenePlan}, nil),
-		agentNode(NodeDesignShots, []NodeID{NodeScenePlan}, "shot-designer-agent"),
+		agentNode(NodeDesignShots, []NodeID{NodeValidateSpec, NodeCreateAssets}, "shot-designer-agent"),
 		agentNode(NodeAssembleScene, []NodeID{NodeCreateAssets, NodeDesignShots}, "scene-assembly-agent"),
 		toolNode(NodePreviewRender, []NodeID{NodeAssembleScene}, "blender.render.submit"),
 		stageNode(NodeInspect, []NodeID{NodePreviewRender}, nil),
-		toolNode(NodeFinalRender, []NodeID{NodeInspect}, "blender.render.submit"),
+		toolNode(NodeFinalRender, []NodeID{NodeAssembleScene, NodeInspect}, "blender.render.submit"),
 		toolNode(NodeEncode, []NodeID{NodeFinalRender}, "ffmpeg.encode"),
 		toolNode(NodeVerify, []NodeID{NodeEncode}, "ffprobe.inspect"),
 		stageNode(NodePublish, []NodeID{NodeVerify}, nil),

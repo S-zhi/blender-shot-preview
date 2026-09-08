@@ -25,3 +25,12 @@ RPC boundary that validates it, not directly on an untrusted public network.
 
 Run `make generate` with Kitex v0.16.0 to regenerate both IDLs. Verify with
 `go test ./...` and `go vet ./...`.
+
+## Shot preview pipeline runtime
+
+The reusable shot-preview orchestration runtime lives in
+`internal/service/pipeline`. It exposes a constructor for wiring an application
+agent service and production-tool registry into the durable DAG runner. See
+[`docs/pipeline/shot-preview-runtime.md`](docs/pipeline/shot-preview-runtime.md)
+for the integration contract, node flow, and remaining production bootstrap
+requirements.
