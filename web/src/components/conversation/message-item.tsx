@@ -16,8 +16,8 @@ export const MessageItem: React.FC<MessageItemProps> = ({ message }) => {
   return (
     <div
       className={clsx(
-        "flex gap-3.5 py-4 px-2 md:px-6 transition-colors rounded-xl",
-        isUser ? "bg-surface-300/30" : "bg-transparent"
+        "flex gap-3.5 py-4 px-2 md:px-6 transition-colors rounded-xl animate-fade-in",
+        isUser ? "bg-surface-card/50" : "bg-transparent"
       )}
     >
       {/* Avatar */}
@@ -25,7 +25,7 @@ export const MessageItem: React.FC<MessageItemProps> = ({ message }) => {
         className={clsx(
           "h-7 w-7 rounded-lg shrink-0 flex items-center justify-center text-xs font-semibold select-none",
           isUser
-            ? "bg-surface-100 text-gray-200 border border-border-default"
+            ? "bg-surface-background text-content border border-border"
             : "bg-brand-primary/20 text-brand-primary border border-brand-primary/30"
         )}
       >
@@ -35,10 +35,10 @@ export const MessageItem: React.FC<MessageItemProps> = ({ message }) => {
       {/* Main Content Area */}
       <div className="flex-1 min-w-0 space-y-1.5">
         <div className="flex items-center gap-2 select-none">
-          <span className="text-xs font-semibold text-gray-300">
+          <span className="text-xs font-semibold text-content-muted">
             {isUser ? "You" : "Shot Preview Assistant"}
           </span>
-          <span className="text-[10px] text-gray-500">
+          <span className="text-[10px] text-content-icon">
             {new Date(message.timestamp).toLocaleTimeString([], {
               hour: "2-digit",
               minute: "2-digit",
@@ -69,11 +69,11 @@ export const MessageItem: React.FC<MessageItemProps> = ({ message }) => {
         )}
 
         {/* Message Body with Markdown */}
-        <div className="prose prose-invert prose-sm max-w-none text-gray-200 text-sm leading-relaxed break-words">
+        <div className="markdown-body prose prose-invert prose-sm max-w-none text-content text-sm leading-relaxed break-words">
           {message.content ? (
             <ReactMarkdown>{message.content}</ReactMarkdown>
           ) : message.isThinking ? (
-            <div className="text-xs text-gray-400 italic">正在生成预览指令与分镜脚本...</div>
+            <div className="text-xs text-content-muted italic">正在生成预览指令与分镜脚本...</div>
           ) : null}
         </div>
       </div>

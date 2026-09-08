@@ -17,10 +17,10 @@ export const Badge: React.FC<BadgeProps> = ({
     "inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium border";
 
   const variants = {
-    success: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
+    success: "bg-status-success-bg text-status-success-text border-status-success-border",
     warning: "bg-amber-500/10 text-amber-400 border-amber-500/20",
-    info: "bg-cyan-500/10 text-cyan-400 border-cyan-500/20",
-    neutral: "bg-surface-200 text-gray-300 border-border-subtle",
+    info: "bg-brand-primary/10 text-brand-primary border-brand-primary/20",
+    neutral: "bg-surface-elevated text-content-muted border-border",
   };
 
   return (

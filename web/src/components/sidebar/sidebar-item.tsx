@@ -29,8 +29,8 @@ export const SidebarItem: React.FC<SidebarItemProps> = ({
       className={clsx(
         "group relative flex items-center justify-between px-3 py-2 text-sm rounded-lg cursor-pointer transition-all duration-150 select-none",
         isActive
-          ? "bg-surface-200 text-white font-medium border border-border-subtle/80 shadow-sm"
-          : "text-gray-400 hover:bg-surface-300/80 hover:text-gray-200"
+          ? "bg-surface-elevated text-content font-medium border-l-2 border-l-brand-primary border border-border shadow-sm"
+          : "text-content-muted hover:bg-surface-outline hover:text-content"
       )}
     >
       <div className="flex items-center gap-2.5 truncate pr-6">
@@ -38,7 +38,7 @@ export const SidebarItem: React.FC<SidebarItemProps> = ({
           size={16}
           className={clsx(
             "shrink-0 transition-colors",
-            isActive ? "text-brand-primary" : "text-gray-500 group-hover:text-gray-400"
+            isActive ? "text-brand-primary" : "text-content-icon group-hover:text-content-muted"
           )}
         />
         <span className="truncate">{conversation.title || "未命名分镜"}</span>
@@ -48,7 +48,7 @@ export const SidebarItem: React.FC<SidebarItemProps> = ({
         <button
           onClick={handleDelete}
           title="删除会话"
-          className="absolute right-2 p-1 text-gray-400 hover:text-red-400 hover:bg-surface-100 rounded transition-colors"
+          className="absolute right-2 p-1 text-content-muted hover:text-status-fail-text hover:bg-surface-elevated rounded transition-colors"
         >
           <Trash2 size={14} />
         </button>

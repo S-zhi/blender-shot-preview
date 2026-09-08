@@ -58,7 +58,7 @@ export const InputBox: React.FC<InputBoxProps> = ({
   return (
     <div className="w-full max-w-3xl mx-auto px-4 pb-4">
       {/* Container styled like OpenHands floating card input */}
-      <div className="relative rounded-2xl bg-surface-300 border border-border-default/80 shadow-xl focus-within:border-border-strong focus-within:ring-1 focus-within:ring-brand-primary/40 transition-all p-3">
+      <div className="relative rounded-2xl bg-surface-elevated border border-border shadow-xl focus-within:border-border-hover focus-within:ring-1 focus-within:ring-brand-primary/30 transition-all p-3">
         {/* Main Textarea */}
         <textarea
           ref={textareaRef}
@@ -68,19 +68,19 @@ export const InputBox: React.FC<InputBoxProps> = ({
           placeholder="描述分镜需求（例如：设计一个俯角 45° 赛博朋克街道推镜头）... Enter 发送，Shift + Enter 换行"
           rows={1}
           disabled={isGenerating}
-          className="w-full bg-transparent text-sm text-gray-100 placeholder-gray-500 resize-none focus:outline-none max-h-44 min-h-[44px] py-1 px-1 leading-relaxed"
+          className="w-full bg-transparent text-sm text-content placeholder-content-muted resize-none focus:outline-none max-h-44 min-h-[44px] py-1 px-1 leading-relaxed"
         />
 
         {/* Bottom Toolbar */}
-        <div className="flex items-center justify-between pt-2 border-t border-border-subtle/50 mt-1 select-none">
+        <div className="flex items-center justify-between pt-2 border-t border-border/50 mt-1 select-none">
           {/* Left Action Buttons */}
-          <div className="flex items-center gap-1.5 text-xs text-gray-400">
+          <div className="flex items-center gap-1.5 text-xs text-content-muted">
             {/* Model Badge */}
             <button
               type="button"
               onClick={() => setModalOpen(true)}
               title="切换模型 / 配置 LLM Key"
-              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-surface-200/80 hover:bg-surface-100 text-gray-300 hover:text-white border border-border-subtle transition-colors cursor-pointer"
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-surface-background hover:bg-surface-divider text-content-muted hover:text-content border border-border transition-colors cursor-pointer"
             >
               <Cpu size={13} className="text-brand-primary" />
               <span className="font-mono text-[11px] font-medium">
@@ -92,7 +92,7 @@ export const InputBox: React.FC<InputBoxProps> = ({
             <button
               type="button"
               title="添加参考图片或 Blender 场景资产"
-              className="p-1.5 rounded-lg hover:bg-surface-200 text-gray-400 hover:text-gray-200 transition-colors"
+              className="p-1.5 rounded-lg hover:bg-surface-elevated text-content-muted hover:text-content transition-colors"
             >
               <Paperclip size={15} />
             </button>
@@ -103,7 +103,7 @@ export const InputBox: React.FC<InputBoxProps> = ({
               onClick={() =>
                 setContent("创建 180 帧平滑环绕运镜，摄影机定焦中心主体，光圈 f/2.8")
               }
-              className="hidden sm:flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-surface-200 text-[11px] text-gray-400 hover:text-gray-200 transition-colors"
+              className="hidden sm:flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-surface-elevated text-[11px] text-content-muted hover:text-content transition-colors"
             >
               <Sparkles size={12} className="text-amber-400" />
               <span>常用镜头</span>
@@ -117,7 +117,7 @@ export const InputBox: React.FC<InputBoxProps> = ({
                 type="button"
                 onClick={stopGenerating}
                 title="停止生成"
-                className="h-8 w-8 rounded-xl bg-red-500/20 text-red-400 hover:bg-red-500/30 flex items-center justify-center transition-colors cursor-pointer"
+                className="h-8 w-8 rounded-xl bg-status-fail-bg text-status-fail-text hover:bg-status-fail-bg/80 flex items-center justify-center transition-colors cursor-pointer"
               >
                 <Square size={13} fill="currentColor" />
               </button>
@@ -130,8 +130,8 @@ export const InputBox: React.FC<InputBoxProps> = ({
                 className={clsx(
                   "h-8 w-8 rounded-xl flex items-center justify-center transition-all cursor-pointer",
                   content.trim()
-                    ? "bg-brand-primary text-gray-950 hover:bg-brand-accent shadow-sm"
-                    : "bg-surface-200 text-gray-500 cursor-not-allowed"
+                    ? "bg-brand-primary text-surface hover:brightness-110 shadow-md hover:shadow-lg hover:scale-105"
+                    : "bg-surface-background text-content-icon cursor-not-allowed"
                 )}
               >
                 <ArrowUp size={16} strokeWidth={2.5} />
