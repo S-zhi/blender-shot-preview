@@ -13,8 +13,8 @@ const (
 	maximumMaxSteps        = 40
 	defaultMaxOutputTokens = 4096
 	maximumMaxOutputTokens = 8192
-	defaultTimeout         = 2 * time.Minute
-	maximumTimeout         = 20 * time.Minute
+	defaultTimeout         = 40 * time.Minute
+	maximumTimeout         = 40 * time.Minute
 )
 
 type AgentDefinitionService interface {

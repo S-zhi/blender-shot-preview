@@ -273,7 +273,7 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
             ),
           }));
           closeStream();
-        }, 120000);
+        }, 1200000);
       };
 
       const pauseInactivityTimeout = () => {
