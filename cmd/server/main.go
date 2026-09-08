@@ -69,12 +69,7 @@ func (s *inMemoryCredentialStore) Delete(_ context.Context, keyID string) error 
 func newMasterKey() ([]byte, error) {
 	encoded := os.Getenv("LLM_GATEWAY_MASTER_KEY")
 	if encoded == "" {
-		// Automatically generate a 32-byte master key for local development
-		key := make([]byte, 32)
-		if _, err := rand.Read(key); err != nil {
-			return nil, err
-		}
-		return key, nil
+		return nil, errors.New("LLM_GATEWAY_MASTER_KEY must be 64 hex characters")
 	}
 	key, err := hex.DecodeString(encoded)
 	if err != nil || len(key) != 32 {
@@ -86,7 +81,11 @@ func newMasterKey() ([]byte, error) {
 func main() {
 	masterKey, err := newMasterKey()
 	if err != nil {
-		log.Fatal(err)
+		// Automatically generate a 32-byte master key for local development
+		masterKey = make([]byte, 32)
+		if _, randErr := rand.Read(masterKey); randErr != nil {
+			log.Fatal(randErr)
+		}
 	}
 	cipher, err := llm_gateway.NewAESGCMCipher(masterKey)
 	clear(masterKey)
@@ -135,4 +134,18 @@ func main() {
 	if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatalf("[HTTP Gateway] ListenAndServe error: %v", err)
 	}
+}
+
+func newServer(manager llm_gateway.KeyManager) (server.Server, error) {
+	shotHandler := handlerv0_1.NewShotPreviewHandler(service.NewShotPreviewService(nil))
+	keyHandler := handlerv0_1.NewLLMKeyHandler(service.NewLLMKeyService(manager))
+	assetHandler := handlerv0_1.NewAssetHandler(service.NewAssetService(nil))
+	svr := shotpreviewservicev0_1.NewServer(shotHandler)
+	if err := llmkeyservicev0_1.RegisterService(svr, keyHandler); err != nil {
+		return nil, err
+	}
+	if err := assetservicev0_1.RegisterService(svr, assetHandler); err != nil {
+		return nil, err
+	}
+	return svr, nil
 }

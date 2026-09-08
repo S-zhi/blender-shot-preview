@@ -58,6 +58,18 @@ export enum AssetStatus {
   ARCHIVED = 3,
 }
 
+export interface AssetMetadata {
+  poly_count?: number;
+  vertex_count?: number;
+  rig_type?: string;
+  has_face_rig?: boolean;
+  texture_maps?: string[];
+  duration_frames?: number;
+  fps?: number;
+  fov_range?: string;
+  camera_trajectory?: { x: number; y: number; z: number; targetX: number; targetY: number; targetZ: number }[];
+}
+
 export interface AssetView {
   asset_id: string;
   name: string;
@@ -71,6 +83,8 @@ export interface AssetView {
   created_at: string;
   updated_at: string;
   description?: string;
+  metadata?: AssetMetadata;
+  preview_images?: { title: string; url: string }[];
 }
 
 export interface ListAssetsRequest {
