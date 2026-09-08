@@ -30,6 +30,16 @@ unreachable endpoints, timeouts, provider errors, and invalid responses fail
 the task with an actionable `LLM_*` error code instead of silently simulating
 an agent run.
 
+## Local SQLite persistence
+
+The server persists conversations, messages, pipeline tasks, agent runs, and
+asset metadata in SQLite. By default the database is created at
+`<BLENDER_WORKSPACE>/data/shot_preview.sqlite`; set `SHOT_PREVIEW_DB_PATH` to
+override it. The database is initialized and incomplete tasks are recovered at
+startup. The web client loads conversation history from
+`GET /api/v0_1/conversations?user_id=...`, so a browser refresh no longer drops
+the current history.
+
 Run `make generate` with Kitex v0.16.0 to regenerate both IDLs. Verify with
 `go test ./...` and `go vet ./...`.
 

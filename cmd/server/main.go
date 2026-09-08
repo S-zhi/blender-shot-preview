@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -21,6 +23,7 @@ import (
 	"github.com/S-zhi/blender-shot-preview/internal/productiontools"
 	"github.com/S-zhi/blender-shot-preview/internal/service"
 	"github.com/S-zhi/blender-shot-preview/internal/service/pipeline"
+	"github.com/S-zhi/blender-shot-preview/internal/storage/sqlite"
 	"github.com/S-zhi/blender-shot-preview/kitex_gen/handler/v0_1/assetservicev0_1"
 	"github.com/S-zhi/blender-shot-preview/kitex_gen/handler/v0_1/llmkeyservicev0_1"
 	"github.com/S-zhi/blender-shot-preview/kitex_gen/handler/v0_1/shotpreviewservicev0_1"
@@ -129,15 +132,14 @@ func main() {
 	}
 
 	// 1. Initialize shared services & handlers
-	workspaceDir := getWorkspaceDir()
-	assetStore, err := service.NewFileAssetStore(filepath.Join(workspaceDir, "assets", "metadata.json"))
+	runtime, err := buildPipelineRuntime(keyManager)
 	if err != nil {
-		log.Fatalf("failed to initialize asset store: %v", err)
+		log.Fatalf("failed to initialize persistent runtime: %v", err)
 	}
-	runner := buildPipelineRunner(keyManager)
-	shotPreviewSvc := service.NewShotPreviewService(runner)
+	defer runtime.db.Close()
+	shotPreviewSvc := service.NewShotPreviewServiceWithConversations(runtime.runner, runtime.conversations)
 	llmKeySvc := service.NewLLMKeyService(keyManager)
-	assetSvc := service.NewAssetService(assetStore)
+	assetSvc := service.NewAssetService(runtime.assets)
 
 	shotHandler := handlerv0_1.NewShotPreviewHandler(shotPreviewSvc)
 	keyHandler := handlerv0_1.NewLLMKeyHandler(llmKeySvc)
@@ -158,8 +160,8 @@ func main() {
 	}()
 
 	// 3. Start HTTP Gateway on 127.0.0.1:8888 for Web Frontend
-	httpGateway := gateway.NewHTTPGateway(shotHandler, keyHandler, assetHandler)
-	httpGateway.SetAssetsDir(filepath.Join(workspaceDir, "assets"))
+	httpGateway := gateway.NewHTTPGateway(shotHandler, keyHandler, assetHandler, runtime.conversations)
+	httpGateway.SetAssetsDir(filepath.Join(getWorkspaceDir(), "assets"))
 	httpServer := &http.Server{
 		Addr:    "127.0.0.1:8888",
 		Handler: httpGateway,
@@ -176,13 +178,14 @@ func newServer(manager llm_gateway.KeyManager, opts ...server.Option) (server.Se
 	if ku, ok := manager.(llm_gateway.KeyUser); ok {
 		keyUser = ku
 	}
-	workspaceDir := getWorkspaceDir()
-	assetStore, _ := service.NewFileAssetStore(filepath.Join(workspaceDir, "assets", "metadata.json"))
-	runner := buildPipelineRunner(keyUser)
-	shotPreviewSvc := service.NewShotPreviewService(runner)
+	runtime, err := buildPipelineRuntime(keyUser)
+	if err != nil {
+		return nil, err
+	}
+	shotPreviewSvc := service.NewShotPreviewServiceWithConversations(runtime.runner, runtime.conversations)
 	shotHandler := handlerv0_1.NewShotPreviewHandler(shotPreviewSvc)
 	keyHandler := handlerv0_1.NewLLMKeyHandler(service.NewLLMKeyService(manager))
-	assetHandler := handlerv0_1.NewAssetHandler(service.NewAssetService(assetStore))
+	assetHandler := handlerv0_1.NewAssetHandler(service.NewAssetService(runtime.assets))
 	return newServerWithHandlers(shotHandler, keyHandler, assetHandler, opts...)
 }
 
@@ -214,8 +217,16 @@ func getWorkspaceDir() string {
 	return workspaceDir
 }
 
-func buildPipelineRunner(keyUser llm_gateway.KeyUser) *pipeline.Runner {
+type pipelineRuntime struct {
+	runner        *pipeline.Runner
+	conversations service.ConversationStore
+	assets        service.AssetStore
+	db            *sql.DB
+}
+
+func buildPipelineRuntime(keyUser llm_gateway.KeyUser) (*pipelineRuntime, error) {
 	workspaceDir := getWorkspaceDir()
+	_ = os.WriteFile(filepath.Join(workspaceDir, "assets", "asset-1.blend"), []byte("BLENDER DEV PLACEHOLDER"), 0644)
 
 	blenderBin := os.Getenv("BLENDER_BINARY")
 	if blenderBin == "" {
@@ -233,20 +244,35 @@ func buildPipelineRunner(keyUser llm_gateway.KeyUser) *pipeline.Runner {
 		Executor:      devCommandExecutor{wsRoot: workspaceDir},
 	})
 
-	repo := pipeline.NewMemoryRepository()
-	defRepo := agent.NewMemoryDefinitionRepository()
-	runRepo := agent.NewMemoryRunRepository()
-	devMode := strings.EqualFold(strings.TrimSpace(os.Getenv("SHOT_PREVIEW_DEV_MODE")), "true")
+	dbPath := os.Getenv("SHOT_PREVIEW_DB_PATH")
+	if dbPath == "" {
+		dbPath = filepath.Join(workspaceDir, "data", "shot_preview.sqlite")
+	}
+	db, err := sqlite.Open(dbPath)
+	if err != nil {
+		return nil, err
+	}
+	repo := sqlite.NewPipelineRepository(db)
+	defRepo := sqlite.NewAgentDefinitionRepository(db)
+	runRepo := sqlite.NewAgentRunRepository(db)
+	conversationStore := sqlite.NewConversationStore(db)
+	assetStore := sqlite.NewAssetStore(db)
+	if err := assetStore.SeedDefaults(context.Background()); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("seed persistent assets: %w", err)
+	}
 	modelResolver := agent.NewStaticModelResolver(map[string]model.BaseChatModel{
 		agent.ProductionModelProfile: &devChatModel{},
 	})
 	factory, err := agent.NewEinoAgentFactory(modelResolver, skillRegistry)
 	if err != nil {
-		return nil
+		db.Close()
+		return nil, err
 	}
 	defService, err := agent.NewDefinitionService(defRepo, skillRegistry, modelResolver)
 	if err != nil {
-		return nil
+		db.Close()
+		return nil, err
 	}
 	ctx := context.Background()
 	for _, def := range agent.ProductionAgentDefinitions() {
@@ -266,15 +292,34 @@ func buildPipelineRunner(keyUser llm_gateway.KeyUser) *pipeline.Runner {
 	}
 	agentSvc, err := agent.NewService(defRepo, runRepo, factory)
 	if err != nil {
-		return nil
+		db.Close()
+		return nil, err
 	}
-
+	devMode := strings.EqualFold(strings.TrimSpace(os.Getenv("SHOT_PREVIEW_DEV_MODE")), "true")
+	var runner *pipeline.Runner
 	if devMode {
 		// Development mode is explicit and intentionally bypasses credential
 		// resolution so the deterministic devChatModel remains usable in tests.
-		return pipeline.NewShotPreviewRunner(repo, agentSvc, skillRegistry)
+		runner = pipeline.NewShotPreviewRunner(repo, agentSvc, skillRegistry)
+	} else {
+		runner = pipeline.NewShotPreviewRunnerWithKeys(repo, agentSvc, skillRegistry, keyUser)
 	}
-	return pipeline.NewShotPreviewRunnerWithKeys(repo, agentSvc, skillRegistry, keyUser)
+	if err := runner.Recover(context.Background()); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("recover persisted pipeline tasks: %w", err)
+	}
+	return &pipelineRuntime{runner: runner, conversations: conversationStore, assets: assetStore, db: db}, nil
+}
+
+// buildPipelineRunner is kept for package-level callers that only need the
+// runner. Production startup uses buildPipelineRuntime so the database handle
+// can be closed with the server lifecycle.
+func buildPipelineRunner(keyUser llm_gateway.KeyUser) *pipeline.Runner {
+	runtime, err := buildPipelineRuntime(keyUser)
+	if err != nil {
+		return nil
+	}
+	return runtime.runner
 }
 
 type devChatModel struct{}

@@ -18,23 +18,30 @@ import (
 )
 
 type HTTPGateway struct {
-	shotHandler  *handlerv0_1.ShotPreviewHandler
-	keyHandler   *handlerv0_1.LLMKeyHandler
-	assetHandler *handlerv0_1.AssetHandler
-	assetsDir    string
-	mux          *http.ServeMux
+	shotHandler       *handlerv0_1.ShotPreviewHandler
+	keyHandler        *handlerv0_1.LLMKeyHandler
+	assetHandler      *handlerv0_1.AssetHandler
+	assetsDir         string
+	conversationStore service.ConversationStore
+	mux               *http.ServeMux
 }
 
 func NewHTTPGateway(
 	shotHandler *handlerv0_1.ShotPreviewHandler,
 	keyHandler *handlerv0_1.LLMKeyHandler,
 	assetHandler *handlerv0_1.AssetHandler,
+	conversationStores ...service.ConversationStore,
 ) *HTTPGateway {
+	var conversationStore service.ConversationStore
+	if len(conversationStores) > 0 {
+		conversationStore = conversationStores[0]
+	}
 	gw := &HTTPGateway{
-		shotHandler:  shotHandler,
-		keyHandler:   keyHandler,
-		assetHandler: assetHandler,
-		mux:          http.NewServeMux(),
+		shotHandler:       shotHandler,
+		keyHandler:        keyHandler,
+		assetHandler:      assetHandler,
+		conversationStore: conversationStore,
+		mux:               http.NewServeMux(),
 	}
 	gw.routes()
 	return gw
@@ -66,11 +73,61 @@ func (g *HTTPGateway) routes() {
 	g.mux.HandleFunc("/api/v0_1/shot-preview/task/node/confirm", g.handleNodeConfirm)
 	g.mux.HandleFunc("/api/v0_1/shot-preview/task/node/adjust", g.handleNodeAdjust)
 	g.mux.HandleFunc("/api/v0_1/shot-preview/artifacts/download", g.handleArtifactDownload)
+	g.mux.HandleFunc("/api/v0_1/conversations", g.handleConversations)
 	g.mux.HandleFunc("/api/v0_1/llm-gateway/key", g.handleLLMKey)
 	g.mux.HandleFunc("/api/v0_1/assets", g.handleAssets)
 	g.mux.HandleFunc("/api/v0_1/assets/upload", g.handleAssetUpload)
 	g.mux.HandleFunc("/api/v0_1/assets/stats", g.handleAssetStats)
 	g.mux.HandleFunc("/api/v0_1/assets/delete", g.handleAssetDelete)
+}
+
+func (g *HTTPGateway) handleConversations(w http.ResponseWriter, r *http.Request) {
+	if g.conversationStore == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "conversation store unavailable"})
+		return
+	}
+	userID := r.URL.Query().Get("user_id")
+	if userID == "" {
+		userID = "default_user_001"
+	}
+	switch r.Method {
+	case http.MethodGet:
+		conversationID := strings.TrimSpace(r.URL.Query().Get("conversation_id"))
+		if conversationID != "" {
+			conversation, err := g.conversationStore.Get(r.Context(), userID, conversationID)
+			if err != nil {
+				writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+				return
+			}
+			writeJSON(w, http.StatusOK, conversation)
+			return
+		}
+		conversations, err := g.conversationStore.List(r.Context(), userID)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		if conversations == nil {
+			conversations = []service.Conversation{}
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"conversations": conversations})
+		return
+	case http.MethodDelete:
+		conversationID := strings.TrimSpace(r.URL.Query().Get("conversation_id"))
+		if conversationID == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "conversation_id is required"})
+			return
+		}
+		if err := g.conversationStore.Delete(r.Context(), userID, conversationID); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]bool{"success": true})
+		return
+	default:
+		w.Header().Set("Allow", "GET, DELETE")
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+	}
 }
 
 func (g *HTTPGateway) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -507,6 +564,9 @@ func (g *HTTPGateway) handleShotPreviewStream(w http.ResponseWriter, r *http.Req
 			data, _ := json.Marshal(event)
 			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event.Type, string(data))
 			flusher.Flush()
+			// Keep the durable assistant message aligned with the latest task
+			// snapshot. SSE remains a delivery mechanism, not the source of truth.
+			_, _ = shotSvc.GetTask(r.Context(), service.GetTaskRequest{UserID: userID, TaskID: taskID})
 			if event.Type == pipeline.EventTaskSucceeded || event.Type == pipeline.EventTaskFailed {
 				return
 			}

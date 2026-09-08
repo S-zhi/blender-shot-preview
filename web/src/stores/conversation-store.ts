@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { Conversation, Message, TaskNodeView, TaskStatus } from "#/api/types";
 import { ShotPreviewService } from "#/api/shot-preview-service";
+import { ConversationService } from "#/api/conversation-service";
 
 interface ConversationState {
   conversations: Conversation[];
@@ -9,6 +10,7 @@ interface ConversationState {
 
   // Actions
   createNewConversation: () => string;
+  hydrateConversations: () => Promise<void>;
   selectConversation: (id: string) => void;
   deleteConversation: (id: string) => void;
   updateConversationTitle: (id: string, title: string) => void;
@@ -91,11 +93,29 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
     return newId;
   },
 
+  hydrateConversations: async () => {
+    try {
+      const conversations = await ConversationService.list();
+      set((state) => ({
+        conversations,
+        activeConversationId:
+          state.activeConversationId && conversations.some((c) => c.id === state.activeConversationId)
+            ? state.activeConversationId
+            : conversations[0]?.id || null,
+      }));
+    } catch (error) {
+      // Keep the local demo state when the backend is unavailable. Once the
+      // SQLite API is online, this branch is replaced by durable history.
+      console.warn("Failed to hydrate conversation history:", error);
+    }
+  },
+
   selectConversation: (id: string) => {
     set({ activeConversationId: id });
   },
 
   deleteConversation: (id: string) => {
+    ConversationService.remove(id).catch((error) => console.warn("Failed to delete conversation:", error));
     set((state) => {
       const remaining = state.conversations.filter((c) => c.id !== id);
       const nextActiveId =
