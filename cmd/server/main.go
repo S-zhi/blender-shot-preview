@@ -2,13 +2,17 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/hex"
 	"errors"
 	"log"
+	"net"
+	"net/http"
 	"os"
 	"sync"
 
 	llm_gateway "github.com/S-zhi/blender-shot-preview/internal/agent/llm_gateway"
+	"github.com/S-zhi/blender-shot-preview/internal/gateway"
 	handlerv0_1 "github.com/S-zhi/blender-shot-preview/internal/handler/v0_1"
 	"github.com/S-zhi/blender-shot-preview/internal/service"
 	"github.com/S-zhi/blender-shot-preview/kitex_gen/handler/v0_1/assetservicev0_1"
@@ -65,7 +69,12 @@ func (s *inMemoryCredentialStore) Delete(_ context.Context, keyID string) error 
 func newMasterKey() ([]byte, error) {
 	encoded := os.Getenv("LLM_GATEWAY_MASTER_KEY")
 	if encoded == "" {
-		return nil, errors.New("LLM_GATEWAY_MASTER_KEY must be set to 64 hex characters")
+		// Automatically generate a 32-byte master key for local development
+		key := make([]byte, 32)
+		if _, err := rand.Read(key); err != nil {
+			return nil, err
+		}
+		return key, nil
 	}
 	key, err := hex.DecodeString(encoded)
 	if err != nil || len(key) != 32 {
@@ -89,26 +98,41 @@ func main() {
 		log.Fatal(err)
 	}
 
-	svr, err := newServer(keyManager)
-	if err != nil {
-		log.Fatal(err)
+	// 1. Initialize shared services & handlers
+	shotPreviewSvc := service.NewShotPreviewService(nil)
+	llmKeySvc := service.NewLLMKeyService(keyManager)
+	assetSvc := service.NewAssetService(nil)
+
+	shotHandler := handlerv0_1.NewShotPreviewHandler(shotPreviewSvc)
+	keyHandler := handlerv0_1.NewLLMKeyHandler(llmKeySvc)
+	assetHandler := handlerv0_1.NewAssetHandler(assetSvc)
+
+	// 2. Start Kitex Thrift RPC Server on 127.0.0.1:8889 in background
+	kitexAddr, _ := net.ResolveTCPAddr("tcp", "127.0.0.1:8889")
+	kitexSvr := shotpreviewservicev0_1.NewServer(shotHandler, server.WithServiceAddr(kitexAddr))
+	if err := llmkeyservicev0_1.RegisterService(kitexSvr, keyHandler); err != nil {
+		log.Fatalf("failed to register LLMKeyService: %v", err)
+	}
+	if err := assetservicev0_1.RegisterService(kitexSvr, assetHandler); err != nil {
+		log.Fatalf("failed to register AssetService: %v", err)
 	}
 
-	if err := svr.Run(); err != nil {
-		log.Fatal(err)
-	}
-}
+	go func() {
+		log.Println("[Kitex RPC] Server listening on 127.0.0.1:8889")
+		if err := kitexSvr.Run(); err != nil {
+			log.Printf("[Kitex RPC] Server error: %v", err)
+		}
+	}()
 
-func newServer(manager llm_gateway.KeyManager) (server.Server, error) {
-	handler := handlerv0_1.NewShotPreviewHandler(service.NewShotPreviewService(nil))
-	keyHandler := handlerv0_1.NewLLMKeyHandler(service.NewLLMKeyService(manager))
-	assetHandler := handlerv0_1.NewAssetHandler(service.NewAssetService(nil))
-	svr := shotpreviewservicev0_1.NewServer(handler)
-	if err := llmkeyservicev0_1.RegisterService(svr, keyHandler); err != nil {
-		return nil, err
+	// 3. Start HTTP Gateway on 127.0.0.1:8888 for Web Frontend
+	httpGateway := gateway.NewHTTPGateway(shotHandler, keyHandler, assetHandler)
+	httpServer := &http.Server{
+		Addr:    "127.0.0.1:8888",
+		Handler: httpGateway,
 	}
-	if err := assetservicev0_1.RegisterService(svr, assetHandler); err != nil {
-		return nil, err
+
+	log.Println("[HTTP Gateway] API Server listening on http://127.0.0.1:8888")
+	if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		log.Fatalf("[HTTP Gateway] ListenAndServe error: %v", err)
 	}
-	return svr, nil
 }
