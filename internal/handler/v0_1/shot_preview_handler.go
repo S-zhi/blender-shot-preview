@@ -77,7 +77,8 @@ func (h *ShotPreviewHandler) CreateShotPreviewTask(ctx context.Context, request 
 		}
 	}
 	result, err := h.service.CreateTask(ctx, service.CreateTaskRequest{
-		UserID: userID, Prompt: prompt, ConversationID: strings.TrimSpace(request.GetConversationId()), RequestID: requestID,
+		UserID: userID, KeyID: keyIDFromContext(ctx), Prompt: prompt,
+		ConversationID: strings.TrimSpace(request.GetConversationId()), RequestID: requestID,
 		WorkflowID: strings.TrimSpace(request.GetWorkflowId()), WorkflowVersion: strings.TrimSpace(request.GetWorkflowVersion()),
 		RequireConfirmation: true,
 	})
@@ -243,3 +244,19 @@ func generateRequestID() (string, error) {
 	}
 	return hex.EncodeToString(buffer), nil
 }
+
+// llmKeyIDContextKey is the unexported type used to store the LLM key ID in a
+// request context without colliding with other packages' context values.
+type llmKeyIDContextKey struct{}
+
+// LLMKeyIDContextKey is the exported sentinel value that callers (e.g. the HTTP
+// gateway) use when injecting the selected key ID into a context.
+var LLMKeyIDContextKey llmKeyIDContextKey
+
+// keyIDFromContext extracts the optional LLM key ID stored by the HTTP gateway.
+// Returns an empty string when the caller did not supply one.
+func keyIDFromContext(ctx context.Context) string {
+	v, _ := ctx.Value(LLMKeyIDContextKey).(string)
+	return v
+}
+

@@ -36,6 +36,7 @@ type ShotPreviewService interface {
 
 type CreateTaskRequest struct {
 	UserID              string
+	KeyID               string // optional: pin a specific LLM credential for this task
 	Prompt              string
 	ConversationID      string
 	RequestID           string

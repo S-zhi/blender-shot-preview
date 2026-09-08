@@ -9,6 +9,7 @@ export interface CreateShotPreviewTaskRequest {
   prompt: string;
   conversation_id?: string;
   request_id?: string;
+  key_id?: string; // optional: pin a specific saved LLM credential for this task
 }
 
 export interface CreateShotPreviewTaskResponse {

@@ -64,6 +64,7 @@ func (s *ShotPreviewServiceImpl) CreateTask(ctx context.Context, request CreateT
 
 	input, err := pipeline.NewSnapshot(shotPreviewInput{
 		UserID:         userID,
+		KeyID:          strings.TrimSpace(request.KeyID),
 		Prompt:         prompt,
 		ConversationID: conversationID,
 		RequestID:      requestID,
@@ -289,7 +290,9 @@ func (s *ShotPreviewServiceImpl) Pipeline() *pipeline.Runner {
 
 type shotPreviewInput struct {
 	UserID         string `json:"user_id"`
+	KeyID          string `json:"key_id,omitempty"`
 	Prompt         string `json:"prompt"`
 	ConversationID string `json:"conversation_id,omitempty"`
 	RequestID      string `json:"request_id"`
 }
+

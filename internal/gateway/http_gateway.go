@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -177,8 +178,12 @@ func (g *HTTPGateway) getShotPreviewTask(w http.ResponseWriter, r *http.Request)
 }
 
 func (g *HTTPGateway) createShotPreviewTask(w http.ResponseWriter, r *http.Request) {
-	var req api.CreateShotPreviewTaskRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	// Read the standard Thrift-mapped fields plus the HTTP-only key_id extension.
+	var body struct {
+		api.CreateShotPreviewTaskRequest
+		KeyID string `json:"key_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json body: " + err.Error()})
 		return
 	}
@@ -188,7 +193,14 @@ func (g *HTTPGateway) createShotPreviewTask(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	res, err := g.shotHandler.CreateShotPreviewTask(r.Context(), &req)
+	// Inject the selected LLM key ID into the context so the handler can
+	// thread it through to the pipeline runtime without touching the IDL.
+	ctx := r.Context()
+	if keyID := strings.TrimSpace(body.KeyID); keyID != "" {
+		ctx = context.WithValue(ctx, handlerv0_1.LLMKeyIDContextKey, keyID)
+	}
+
+	res, err := g.shotHandler.CreateShotPreviewTask(ctx, &body.CreateShotPreviewTaskRequest)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return

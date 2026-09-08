@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
-import { ArrowUp, Square, Paperclip, Cpu, Sparkles } from "lucide-react";
+import { ArrowUp, Square, Paperclip, Cpu, Sparkles, ChevronDown, Check } from "lucide-react";
 import clsx from "clsx";
 import { useConversationStore } from "#/stores/conversation-store";
 import { useSettingsStore } from "#/stores/settings-store";
@@ -15,10 +15,23 @@ export const InputBox: React.FC<InputBoxProps> = ({
   onClearInitialPrompt,
 }) => {
   const [content, setContent] = useState("");
+  const [providerMenuOpen, setProviderMenuOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const providerMenuRef = useRef<HTMLDivElement>(null);
   const { sendMessage, isGenerating, stopGenerating } = useConversationStore();
-  const { selectedProviderId, modelName } = useSettingsStore();
+  const { selectedProviderId, providers, setSelectedProviderId } = useSettingsStore();
   const { setActiveView } = useNavigationStore();
+
+  // Close provider menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (providerMenuRef.current && !providerMenuRef.current.contains(e.target as Node)) {
+        setProviderMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   useEffect(() => {
     if (initialPrompt) {
@@ -56,6 +69,11 @@ export const InputBox: React.FC<InputBoxProps> = ({
     }
   };
 
+  const currentProvider = providers.find((p) => p.id === selectedProviderId);
+  // Providers that have been saved to the backend (have a key_id)
+  const savedProviders = providers.filter((p) => p.savedKeyId);
+  const hasSavedProviders = savedProviders.length > 0;
+
   return (
     <div className="w-full max-w-3xl mx-auto px-4 pb-4">
       {/* Container styled like OpenHands floating card input */}
@@ -76,18 +94,65 @@ export const InputBox: React.FC<InputBoxProps> = ({
         <div className="flex items-center justify-between pt-2 border-t border-border/50 mt-1 select-none">
           {/* Left Action Buttons */}
           <div className="flex items-center gap-1.5 text-xs text-content-muted">
-            {/* Model Badge */}
-            <button
-              type="button"
-              onClick={() => setActiveView("settings")}
-              title="切换模型 / 配置 LLM Key"
-              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-surface-background hover:bg-surface-divider text-content-muted hover:text-content border border-border transition-colors cursor-pointer"
-            >
-              <Cpu size={13} className="text-brand-primary" />
-              <span className="font-mono text-[11px] font-medium">
-                {selectedProviderId}: {modelName}
-              </span>
-            </button>
+
+            {/* Provider Selector */}
+            <div className="relative" ref={providerMenuRef}>
+              <button
+                type="button"
+                onClick={() => hasSavedProviders ? setProviderMenuOpen((o) => !o) : setActiveView("settings")}
+                title={hasSavedProviders ? "切换模型提供商" : "前往设置配置 LLM Key"}
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-surface-background hover:bg-surface-divider text-content-muted hover:text-content border border-border transition-colors cursor-pointer"
+              >
+                <Cpu size={13} className="text-brand-primary" />
+                <span className="font-mono text-[11px] font-medium">
+                  {currentProvider?.label ?? selectedProviderId}
+                  {currentProvider?.modelName ? `: ${currentProvider.modelName}` : ""}
+                </span>
+                {hasSavedProviders && (
+                  <ChevronDown
+                    size={11}
+                    className={clsx("transition-transform text-content-icon", providerMenuOpen && "rotate-180")}
+                  />
+                )}
+              </button>
+
+              {/* Dropdown menu */}
+              {providerMenuOpen && hasSavedProviders && (
+                <div className="absolute bottom-full mb-1.5 left-0 min-w-[200px] bg-surface-elevated border border-border rounded-xl shadow-2xl z-50 py-1 overflow-hidden">
+                  <p className="px-3 py-1.5 text-[10px] font-semibold text-content-muted uppercase tracking-wider">
+                    选择模型提供商
+                  </p>
+                  {savedProviders.map((p) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => {
+                        setSelectedProviderId(p.id);
+                        setProviderMenuOpen(false);
+                      }}
+                      className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-surface-divider transition-colors text-left"
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className="text-xs font-medium text-content truncate">{p.label}</div>
+                        <div className="text-[10px] text-content-muted font-mono truncate">{p.modelName}</div>
+                      </div>
+                      {p.id === selectedProviderId && (
+                        <Check size={13} className="text-brand-primary shrink-0" />
+                      )}
+                    </button>
+                  ))}
+                  <div className="border-t border-border/50 mt-1 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => { setActiveView("settings"); setProviderMenuOpen(false); }}
+                      className="w-full px-3 py-1.5 text-[11px] text-content-muted hover:text-content hover:bg-surface-divider transition-colors text-left"
+                    >
+                      管理提供商配置...
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
 
             {/* Quick action: Attachment / Scene Preset */}
             <button
@@ -144,3 +209,4 @@ export const InputBox: React.FC<InputBoxProps> = ({
     </div>
   );
 };
+

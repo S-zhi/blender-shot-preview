@@ -65,7 +65,7 @@ func (i AgentServiceInvoker) InvokeAgent(ctx context.Context, request AgentReque
 		if identity.UserID == "" {
 			return nil, &agent.LLMError{Code: agent.LLMCredentialUnavailable, Cause: errors.New("user identity is required to resolve an LLM credential")}
 		}
-		usableKey, keyErr := i.Keys.Use(ctx, "", identity.UserID)
+		usableKey, keyErr := i.Keys.Use(ctx, identity.KeyID, identity.UserID)
 		if keyErr != nil {
 			code := agent.LLMCredentialUnavailable
 			if errors.Is(keyErr, llmgateway.ErrCredentialNotFound) || errors.Is(keyErr, llmgateway.ErrInvalidCommand) {
@@ -78,7 +78,7 @@ func (i AgentServiceInvoker) InvokeAgent(ctx context.Context, request AgentReque
 		}
 		agentReq.Model = agent.NewChatModelFromKey(usableKey, "")
 	} else if i.Keys != nil && identity.UserID != "" {
-		if usableKey, err := i.Keys.Use(ctx, "", identity.UserID); err == nil && usableKey.APIKey != "" {
+		if usableKey, err := i.Keys.Use(ctx, identity.KeyID, identity.UserID); err == nil && usableKey.APIKey != "" {
 			agentReq.Model = agent.NewChatModelFromKey(usableKey, "")
 		}
 	}
@@ -95,6 +95,7 @@ func (i AgentServiceInvoker) InvokeAgent(ctx context.Context, request AgentReque
 
 type pipelineIdentity struct {
 	UserID         string `json:"user_id"`
+	KeyID          string `json:"key_id,omitempty"`
 	Prompt         string `json:"prompt"`
 	ConversationID string `json:"conversation_id"`
 }
