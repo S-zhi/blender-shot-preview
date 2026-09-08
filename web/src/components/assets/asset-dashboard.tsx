@@ -14,6 +14,7 @@ import {
   CheckCircle2,
   X,
   Loader2,
+  FileUp,
 } from "lucide-react";
 import clsx from "clsx";
 import { AssetService } from "#/api/asset-service";
@@ -31,11 +32,16 @@ export const AssetDashboard: React.FC = () => {
   });
   const [loading, setLoading] = useState(true);
 
-  // Upload modal state
+  // Drag & Drop Upload modal state
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
   const [uploadName, setUploadName] = useState("");
   const [uploadType, setUploadType] = useState<AssetType>(AssetType.MODEL_3D);
+  const [uploadDescription, setUploadDescription] = useState("");
+  const [uploadTags, setUploadTags] = useState("");
   const [isUploading, setIsUploading] = useState(false);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   const fetchAssetsAndStats = useCallback(async () => {
     try {
@@ -73,26 +79,100 @@ export const AssetDashboard: React.FC = () => {
     }
   };
 
+  const inferTypeFromExt = (fileName: string): AssetType => {
+    const ext = fileName.split(".").pop()?.toLowerCase() || "";
+    if (["blend", "fbx", "obj", "gltf", "glb", "usd", "usda", "usdc", "usdz"].includes(ext)) {
+      return AssetType.MODEL_3D;
+    }
+    if (["json", "py"].includes(ext)) {
+      return AssetType.SHOT_PRESET;
+    }
+    if (["png", "jpg", "jpeg", "hdr", "exr", "tif", "tiff", "tga"].includes(ext)) {
+      return AssetType.MATERIAL;
+    }
+    if (["abc", "bvh"].includes(ext)) {
+      return AssetType.ANIMATION;
+    }
+    return AssetType.MODEL_3D;
+  };
+
+  const handleFileChosen = (file: File) => {
+    setSelectedFile(file);
+    setUploadName(file.name);
+    const inferred = inferTypeFromExt(file.name);
+    setUploadType(inferred);
+    setUploadDescription(
+      `本地拖拽导入: ${file.name} (${formatBytes(file.size)})`
+    );
+    const ext = file.name.split(".").pop()?.toLowerCase() || "";
+    setUploadTags(`本地导入, ${ext}`);
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      handleFileChosen(e.dataTransfer.files[0]);
+    }
+  };
+
+  const resetUploadModal = () => {
+    setSelectedFile(null);
+    setIsDragging(false);
+    setUploadName("");
+    setUploadType(AssetType.MODEL_3D);
+    setUploadDescription("");
+    setUploadTags("");
+    setIsUploadModalOpen(false);
+  };
+
   const handleUploadSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!uploadName.trim()) return;
     try {
       setIsUploading(true);
-      await AssetService.registerAsset({
-        user_id: "default_user_001",
-        name: uploadName,
-        asset_type: uploadType,
-        file_format: uploadType === AssetType.MODEL_3D ? "blend" : "json",
-        file_size_bytes: 54 * 1024 * 1024,
-        storage_uri: `blender://assets/${uploadName}`,
-        description: "由前端看板真实注册的分镜工程资产",
-        tags: ["新建分镜素材", "实机存储"],
-      });
-      setIsUploadModalOpen(false);
-      setUploadName("");
+      const tagsArray = uploadTags
+        .split(/[,，]/)
+        .map((t) => t.trim())
+        .filter(Boolean);
+
+      if (selectedFile) {
+        await AssetService.uploadAsset(selectedFile, {
+          user_id: "default_user_001",
+          name: uploadName,
+          asset_type: uploadType,
+          description: uploadDescription,
+          tags: tagsArray,
+        });
+      } else {
+        await AssetService.registerAsset({
+          user_id: "default_user_001",
+          name: uploadName,
+          asset_type: uploadType,
+          file_format: uploadName.split(".").pop() || "blend",
+          file_size_bytes: 1024 * 1024,
+          storage_uri: `blender://assets/${uploadName}`,
+          description: uploadDescription || "分镜工程注册资产",
+          tags: tagsArray,
+        });
+      }
+      resetUploadModal();
       fetchAssetsAndStats();
     } catch (err) {
-      alert("上传失败: " + (err as Error).message);
+      alert("导入失败: " + (err as Error).message);
     } finally {
       setIsUploading(false);
     }
@@ -352,66 +432,190 @@ export const AssetDashboard: React.FC = () => {
         )}
       </div>
 
-      {/* 5. Upload/Import Asset Modal */}
+      {/* 5. Drag & Drop Upload/Import Asset Modal */}
       {isUploadModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-xs p-4">
-          <div className="w-full max-w-md rounded-2xl bg-[#14171d] border border-[#282f3d] p-6 shadow-2xl space-y-4">
-            <div className="flex items-center justify-between border-b border-[#212733] pb-3">
-              <h3 className="text-base font-semibold text-white">导入分镜素材资产</h3>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-xs p-4 animate-in fade-in duration-150">
+          <div className="w-full max-w-lg rounded-2xl bg-[#14171d] border border-[#282f3d] p-6 shadow-2xl space-y-5 text-content">
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-[#212733] pb-3.5">
+              <div>
+                <h3 className="text-base font-semibold text-white flex items-center gap-2">
+                  <UploadCloud size={18} className="text-brand-primary" />
+                  <span>拖拽导入分镜素材资产</span>
+                </h3>
+                <p className="text-[11px] text-[#788497] mt-0.5">
+                  支持拖入 Blender 模型、相机轨迹脚本或贴图，流式落盘至工作区
+                </p>
+              </div>
               <button
-                onClick={() => setIsUploadModalOpen(false)}
-                className="p-1 text-[#8490a5] hover:text-white rounded"
+                onClick={resetUploadModal}
+                className="p-1.5 text-[#8490a5] hover:text-white hover:bg-white/5 rounded-lg transition-colors cursor-pointer"
               >
                 <X size={16} />
               </button>
             </div>
 
             <form onSubmit={handleUploadSubmit} className="space-y-4 text-xs">
+              {/* Hidden file input */}
+              <input
+                ref={fileInputRef}
+                type="file"
+                className="hidden"
+                onChange={(e) => {
+                  if (e.target.files && e.target.files.length > 0) {
+                    handleFileChosen(e.target.files[0]);
+                  }
+                }}
+              />
+
+              {/* Drag & Drop Zone */}
+              {!selectedFile ? (
+                <div
+                  onDragOver={handleDragOver}
+                  onDragLeave={handleDragLeave}
+                  onDrop={handleDrop}
+                  onClick={() => fileInputRef.current?.click()}
+                  className={clsx(
+                    "border-2 border-dashed rounded-xl p-7 text-center transition-all cursor-pointer flex flex-col items-center justify-center gap-2.5 select-none",
+                    isDragging
+                      ? "border-brand-primary bg-brand-primary/10 shadow-lg shadow-brand-primary/5 scale-[1.01]"
+                      : "border-[#2b3342] bg-[#0e1014]/60 hover:border-[#3d485c] hover:bg-[#12161f]"
+                  )}
+                >
+                  <div className="w-12 h-12 rounded-full bg-[#1c222c] flex items-center justify-center text-brand-primary shadow-xs">
+                    <FileUp size={22} className={clsx(isDragging && "animate-bounce")} />
+                  </div>
+                  <div>
+                    <div className="text-xs font-semibold text-white/90">
+                      {isDragging ? "松开鼠标完成投放" : "拖拽文件到此处，或点击浏览本地文件"}
+                    </div>
+                    <div className="text-[11px] text-[#6b778c] mt-1">
+                      支持 .blend, .fbx, .obj, .json, .py, .hdr, .abc 等
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap items-center justify-center gap-1.5 pt-1">
+                    {["3D模型 .blend", "镜头预设 .json/.py", "环境贴图 .hdr", "动画缓存 .abc"].map((t) => (
+                      <span
+                        key={t}
+                        className="px-2 py-0.5 rounded text-[10px] font-mono bg-[#161a22] text-[#8490a5] border border-[#232936]"
+                      >
+                        {t}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                /* Selected File Card */
+                <div className="rounded-xl bg-[#0e1014] border border-[#2b3342] p-4 flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3 overflow-hidden">
+                    <div className="w-10 h-10 rounded-lg bg-brand-primary/10 border border-brand-primary/30 flex items-center justify-center shrink-0 text-brand-primary font-mono text-xs font-bold">
+                      .{selectedFile.name.split(".").pop()?.toUpperCase() || "FILE"}
+                    </div>
+                    <div className="overflow-hidden">
+                      <div className="text-xs font-medium text-white truncate">
+                        {selectedFile.name}
+                      </div>
+                      <div className="text-[11px] text-[#717b8c] font-mono flex items-center gap-2 mt-0.5">
+                        <span>{formatBytes(selectedFile.size)}</span>
+                        <span>·</span>
+                        <span className="text-emerald-400 flex items-center gap-1">
+                          <CheckCircle2 size={11} />
+                          文件就绪
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="px-2.5 py-1 rounded-md text-[11px] text-[#8490a5] hover:text-white hover:bg-white/5 border border-[#252b37] shrink-0 transition-colors cursor-pointer"
+                  >
+                    更换文件
+                  </button>
+                </div>
+              )}
+
+              {/* Metadata Form Fields */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                <div>
+                  <label className="block text-[#8490a5] mb-1 font-medium">资产展示名称</label>
+                  <input
+                    type="text"
+                    value={uploadName}
+                    onChange={(e) => setUploadName(e.target.value)}
+                    placeholder="例如: cyberpunk_camera_rig.blend"
+                    required
+                    className="w-full h-8 px-3 rounded-lg bg-[#0e1014] border border-[#212733] text-white focus:outline-none focus:border-brand-primary text-xs"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[#8490a5] mb-1 font-medium">资产分类 (AssetType)</label>
+                  <select
+                    value={uploadType}
+                    onChange={(e) => setUploadType(Number(e.target.value) as AssetType)}
+                    className="w-full h-8 px-3 rounded-lg bg-[#0e1014] border border-[#212733] text-white focus:outline-none focus:border-brand-primary text-xs cursor-pointer"
+                  >
+                    <option value={AssetType.MODEL_3D}>3D 模型 (.blend, .fbx, .obj)</option>
+                    <option value={AssetType.SHOT_PRESET}>镜头预设 (.json, .py)</option>
+                    <option value={AssetType.MATERIAL}>材质贴图 (.hdr, .exr, .png)</option>
+                    <option value={AssetType.ANIMATION}>动画序列 (.abc, .bvh)</option>
+                  </select>
+                </div>
+              </div>
+
               <div>
-                <label className="block text-[#8490a5] mb-1 font-medium">资产名称</label>
+                <label className="block text-[#8490a5] mb-1 font-medium">标签 Tags (以逗号分隔)</label>
                 <input
                   type="text"
-                  value={uploadName}
-                  onChange={(e) => setUploadName(e.target.value)}
-                  placeholder="例如: camera_dolly_cyberpunk.blend"
-                  required
-                  className="w-full h-8 px-3 rounded-lg bg-[#0e1014] border border-[#212733] text-white focus:outline-none focus:border-brand-primary"
+                  value={uploadTags}
+                  onChange={(e) => setUploadTags(e.target.value)}
+                  placeholder="例如: 主角, 特写, 4K"
+                  className="w-full h-8 px-3 rounded-lg bg-[#0e1014] border border-[#212733] text-white focus:outline-none focus:border-brand-primary text-xs"
                 />
               </div>
 
               <div>
-                <label className="block text-[#8490a5] mb-1 font-medium">资产类别 (AssetType)</label>
-                <select
-                  value={uploadType}
-                  onChange={(e) => setUploadType(Number(e.target.value) as AssetType)}
-                  className="w-full h-8 px-3 rounded-lg bg-[#0e1014] border border-[#212733] text-white focus:outline-none focus:border-brand-primary"
-                >
-                  <option value={AssetType.MODEL_3D}>3D 模型 (.blend, .fbx, .obj)</option>
-                  <option value={AssetType.SHOT_PRESET}>镜头预设 (.json, .py)</option>
-                  <option value={AssetType.MATERIAL}>材质与贴图 (.png, .exr, .hdr)</option>
-                  <option value={AssetType.ANIMATION}>动画序列 (.abc, .bvh)</option>
-                </select>
+                <label className="block text-[#8490a5] mb-1 font-medium">资产描述 Description</label>
+                <textarea
+                  value={uploadDescription}
+                  onChange={(e) => setUploadDescription(e.target.value)}
+                  rows={2}
+                  placeholder="补充关于该模型或镜头的分镜用途..."
+                  className="w-full p-2.5 rounded-lg bg-[#0e1014] border border-[#212733] text-white focus:outline-none focus:border-brand-primary text-xs resize-none"
+                />
               </div>
 
-              <div className="p-3 rounded-lg bg-[#0e1014] border border-[#212733] text-emerald-400/90 text-[11px] leading-relaxed font-mono">
-                提示：提交后将直接发起 POST /api/v0_1/assets 请求，数据持久化到 Go 后端内存池中。
+              {/* Status Hint */}
+              <div className="p-3 rounded-lg bg-[#0e1014] border border-[#212733] text-[11px] text-[#717b8c] leading-relaxed">
+                {selectedFile ? (
+                  <span className="text-emerald-400/90 font-mono">
+                    ✓ 导入后物理文件将流式写入后端工作区 assets 目录，并同步写入 metadata.json 持久化保存。
+                  </span>
+                ) : (
+                  <span>
+                    提示：可将本地文件直接拖拽投放至上方区域，自动完成物理落盘与分类索引。
+                  </span>
+                )}
               </div>
 
-              <div className="flex items-center justify-end gap-2 pt-2">
+              {/* Action Buttons */}
+              <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-[#1c212c]">
                 <button
                   type="button"
-                  onClick={() => setIsUploadModalOpen(false)}
-                  className="px-3 py-1.5 rounded-lg text-[#8490a5] hover:text-white"
+                  onClick={resetUploadModal}
+                  className="px-3.5 py-1.5 rounded-lg text-xs text-[#8490a5] hover:text-white transition-colors cursor-pointer"
                 >
                   取消
                 </button>
                 <button
                   type="submit"
-                  disabled={isUploading}
-                  className="px-4 py-1.5 rounded-lg bg-white text-black font-semibold hover:bg-gray-200 flex items-center gap-1.5"
+                  disabled={isUploading || !uploadName.trim()}
+                  className="px-5 py-1.5 rounded-lg bg-white text-black text-xs font-semibold hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5 transition-all cursor-pointer shadow-md"
                 >
                   {isUploading && <Loader2 size={13} className="animate-spin" />}
-                  <span>确认导入</span>
+                  <span>{isUploading ? "正在导入落盘..." : "确认导入资产"}</span>
                 </button>
               </div>
             </form>

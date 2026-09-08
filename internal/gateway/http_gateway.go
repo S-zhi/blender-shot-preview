@@ -2,9 +2,14 @@ package gateway
 
 import (
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	handlerv0_1 "github.com/S-zhi/blender-shot-preview/internal/handler/v0_1"
 	api "github.com/S-zhi/blender-shot-preview/kitex_gen/handler/v0_1"
@@ -14,6 +19,7 @@ type HTTPGateway struct {
 	shotHandler  *handlerv0_1.ShotPreviewHandler
 	keyHandler   *handlerv0_1.LLMKeyHandler
 	assetHandler *handlerv0_1.AssetHandler
+	assetsDir    string
 	mux          *http.ServeMux
 }
 
@@ -30,6 +36,11 @@ func NewHTTPGateway(
 	}
 	gw.routes()
 	return gw
+}
+
+// SetAssetsDir specifies the directory where uploaded asset files are saved.
+func (g *HTTPGateway) SetAssetsDir(dir string) {
+	g.assetsDir = dir
 }
 
 func (g *HTTPGateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -51,6 +62,7 @@ func (g *HTTPGateway) routes() {
 	g.mux.HandleFunc("/api/v0_1/shot-preview/task", g.handleShotPreviewTask)
 	g.mux.HandleFunc("/api/v0_1/llm-gateway/key", g.handleLLMKey)
 	g.mux.HandleFunc("/api/v0_1/assets", g.handleAssets)
+	g.mux.HandleFunc("/api/v0_1/assets/upload", g.handleAssetUpload)
 	g.mux.HandleFunc("/api/v0_1/assets/stats", g.handleAssetStats)
 	g.mux.HandleFunc("/api/v0_1/assets/delete", g.handleAssetDelete)
 }
@@ -251,6 +263,142 @@ func (g *HTTPGateway) handleAssetStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, res)
+}
+
+func (g *HTTPGateway) handleAssetUpload(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// 500 MB max memory limit for large 3D scene / asset models
+	if err := r.ParseMultipartForm(500 << 20); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "failed to parse multipart form: " + err.Error()})
+		return
+	}
+
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing file field in multipart form: " + err.Error()})
+		return
+	}
+	defer file.Close()
+
+	assetsDir := g.assetsDir
+	if assetsDir == "" {
+		workspaceDir := os.Getenv("BLENDER_WORKSPACE")
+		if workspaceDir == "" {
+			workspaceDir = filepath.Join(os.TempDir(), "blender-shot-preview")
+		}
+		assetsDir = filepath.Join(workspaceDir, "assets")
+	}
+	if err := os.MkdirAll(assetsDir, 0755); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to create assets dir: " + err.Error()})
+		return
+	}
+
+	safeName := filepath.Base(header.Filename)
+	if safeName == "" || safeName == "." {
+		safeName = fmt.Sprintf("asset_%d.bin", time.Now().UnixNano())
+	}
+	destPath := filepath.Join(assetsDir, safeName)
+
+	outFile, err := os.Create(destPath)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to create destination file: " + err.Error()})
+		return
+	}
+	written, err := io.Copy(outFile, file)
+	outFile.Close()
+	if err != nil {
+		_ = os.Remove(destPath)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save file: " + err.Error()})
+		return
+	}
+
+	userID := r.FormValue("user_id")
+	if strings.TrimSpace(userID) == "" {
+		userID = "default_user_001"
+	}
+	assetName := r.FormValue("name")
+	if strings.TrimSpace(assetName) == "" {
+		assetName = safeName
+	}
+	ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(safeName), "."))
+	if ext == "" {
+		ext = "bin"
+	}
+
+	// Infer asset type
+	assetType := inferAssetType(ext)
+	if typeStr := r.FormValue("asset_type"); typeStr != "" {
+		if val, err := strconv.Atoi(typeStr); err == nil && val > 0 {
+			assetType = api.AssetType(val)
+		}
+	}
+
+	desc := r.FormValue("description")
+	if desc == "" {
+		desc = fmt.Sprintf("拖拽上传资产: %s (%s)", safeName, formatFileSize(written))
+	}
+
+	var tags []string
+	if tagsStr := r.FormValue("tags"); tagsStr != "" {
+		if err := json.Unmarshal([]byte(tagsStr), &tags); err != nil {
+			for _, t := range strings.Split(tagsStr, ",") {
+				t = strings.TrimSpace(t)
+				if t != "" {
+					tags = append(tags, t)
+				}
+			}
+		}
+	}
+	if len(tags) == 0 {
+		tags = []string{"拖拽导入", ext}
+	}
+
+	req := api.RegisterAssetRequest{
+		UserId:        userID,
+		Name:          assetName,
+		AssetType:     assetType,
+		FileFormat:    ext,
+		FileSizeBytes: written,
+		StorageUri:    fmt.Sprintf("blender://assets/%s", safeName),
+		Description:   &desc,
+		Tags:          tags,
+	}
+
+	res, err := g.assetHandler.RegisterAsset(r.Context(), &req)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
+func inferAssetType(ext string) api.AssetType {
+	switch strings.ToLower(ext) {
+	case "blend", "fbx", "obj", "gltf", "glb", "dae", "usd", "usda", "usdc", "usdz":
+		return api.AssetType_MODEL_3D
+	case "json", "py":
+		return api.AssetType_SHOT_PRESET
+	case "png", "jpg", "jpeg", "hdr", "exr", "tif", "tiff", "tga":
+		return api.AssetType_MATERIAL
+	case "abc", "bvh":
+		return api.AssetType_ANIMATION
+	default:
+		return api.AssetType_MODEL_3D
+	}
+}
+
+func formatFileSize(bytes int64) string {
+	if bytes <= 0 {
+		return "0 B"
+	}
+	if bytes < 1024*1024 {
+		return fmt.Sprintf("%.1f KB", float64(bytes)/1024)
+	}
+	return fmt.Sprintf("%.1f MB", float64(bytes)/(1024*1024))
 }
 
 func writeJSON(w http.ResponseWriter, status int, data interface{}) {

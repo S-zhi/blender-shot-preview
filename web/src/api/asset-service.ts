@@ -46,4 +46,43 @@ export class AssetService {
       body: JSON.stringify(req),
     });
   }
+
+  static async uploadAsset(
+    file: File,
+    meta: {
+      user_id?: string;
+      name?: string;
+      asset_type?: number;
+      description?: string;
+      tags?: string[];
+    } = {}
+  ): Promise<RegisterAssetResponse> {
+    const formData = new FormData();
+    formData.append("file", file);
+    if (meta.user_id) formData.append("user_id", meta.user_id);
+    if (meta.name) formData.append("name", meta.name);
+    if (meta.asset_type !== undefined) formData.append("asset_type", String(meta.asset_type));
+    if (meta.description) formData.append("description", meta.description);
+    if (meta.tags && meta.tags.length > 0) {
+      formData.append("tags", JSON.stringify(meta.tags));
+    }
+
+    const response = await fetch("/api/v0_1/assets/upload", {
+      method: "POST",
+      body: formData,
+    });
+
+    if (!response.ok) {
+      let errText = `Upload failed with status ${response.status}`;
+      try {
+        const errJson = await response.json();
+        if (errJson.error) errText = errJson.error;
+      } catch {
+        // ignore
+      }
+      throw new Error(errText);
+    }
+
+    return (await response.json()) as RegisterAssetResponse;
+  }
 }

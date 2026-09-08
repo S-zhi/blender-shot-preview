@@ -141,6 +141,7 @@ func main() {
 
 	// 3. Start HTTP Gateway on 127.0.0.1:8888 for Web Frontend
 	httpGateway := gateway.NewHTTPGateway(shotHandler, keyHandler, assetHandler)
+	httpGateway.SetAssetsDir(filepath.Join(workspaceDir, "assets"))
 	httpServer := &http.Server{
 		Addr:    "127.0.0.1:8888",
 		Handler: httpGateway,
