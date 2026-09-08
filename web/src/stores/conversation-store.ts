@@ -1,7 +1,6 @@
 import { create } from "zustand";
-import { Conversation, Message } from "#/api/types";
+import { Conversation, Message, TaskNodeView } from "#/api/types";
 import { ShotPreviewService } from "#/api/shot-preview-service";
-import { mockAdapter } from "#/api/mock-adapter";
 
 interface ConversationState {
   conversations: Conversation[];
@@ -14,6 +13,9 @@ interface ConversationState {
   deleteConversation: (id: string) => void;
   updateConversationTitle: (id: string, title: string) => void;
   sendMessage: (prompt: string) => Promise<void>;
+  confirmNodeStep: (messageId: string, nodeId: string, adjustedOutput?: string) => Promise<void>;
+  adjustNodeStep: (messageId: string, nodeId: string, outputJson: string) => Promise<void>;
+  toggleAutoConfirm: (messageId: string) => void;
   stopGenerating: () => void;
 }
 
@@ -64,6 +66,8 @@ const initialConversations: Conversation[] = [
     ],
   },
 ];
+
+const activeEventSources = new Map<string, EventSource>();
 
 export const useConversationStore = create<ConversationState>((set, get) => ({
   conversations: initialConversations,
@@ -138,6 +142,8 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
       timestamp: Date.now(),
       isThinking: true,
       thoughts: [],
+      nodes: [],
+      autoConfirm: false,
     };
 
     // Append user message & placeholder assistant message
@@ -163,58 +169,327 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
     try {
       // 1. Call ShotPreviewService (RPC Task creation)
       const taskRes = await ShotPreviewService.createShotPreviewTask({
-        user_id: "default_user",
+        user_id: "default_user_001",
         prompt,
         conversation_id: convId,
       });
 
-      // 2. Simulate streaming thought and response like OpenHands
-      await mockAdapter.simulateAgentStream(
-        prompt,
-        (thought) => {
+      // Update message with taskId
+      set((state) => ({
+        conversations: state.conversations.map((c) => {
+          if (c.id === convId) {
+            return {
+              ...c,
+              messages: c.messages.map((m) =>
+                m.id === assistantMsgId
+                  ? {
+                      ...m,
+                      taskId: taskRes.task_id,
+                      thoughts: [
+                        `分镜任务已创建 (Task ID: ${taskRes.task_id})`,
+                        "已连接实时执行流，等待 Agent 工作流推进...",
+                      ],
+                    }
+                  : m
+              ),
+            };
+          }
+          return c;
+        }),
+      }));
+
+      // 2. Open Real SSE Stream
+      const streamUrl = ShotPreviewService.getTaskStreamUrl(taskRes.task_id);
+      const eventSource = new EventSource(streamUrl);
+      activeEventSources.set(assistantMsgId, eventSource);
+
+      const closeStream = () => {
+        eventSource.close();
+        activeEventSources.delete(assistantMsgId);
+        set({ isGenerating: false });
+      };
+
+      eventSource.addEventListener("task_snapshot", (e) => {
+        try {
+          const payload = JSON.parse(e.data);
+          const task = payload.task;
+          if (!task) return;
+
           set((state) => ({
             conversations: state.conversations.map((c) => {
               if (c.id === convId) {
                 return {
                   ...c,
-                  messages: c.messages.map((m) =>
-                    m.id === assistantMsgId
-                      ? {
-                          ...m,
-                          thoughts: [...(m.thoughts || []), thought],
-                        }
-                      : m
-                  ),
+                  messages: c.messages.map((m) => {
+                    if (m.id === assistantMsgId) {
+                      const waitingNode =
+                        task.nodes?.find(
+                          (n: TaskNodeView) => n.status === "waiting_confirmation"
+                        ) || null;
+                      const isDone = task.status === "succeeded";
+                      return {
+                        ...m,
+                        nodes: task.nodes,
+                        artifacts: task.artifacts,
+                        waitingNode,
+                        status: isDone ? "done" : m.status,
+                        isThinking: !isDone,
+                        content: isDone
+                          ? "### 🎬 分镜预览工作流已全部执行完成\n\n已成功生成分镜视频制品，可点击下方按钮下载。"
+                          : m.content,
+                      };
+                    }
+                    return m;
+                  }),
                 };
               }
               return c;
             }),
           }));
-        },
-        (content) => {
-          set((state) => ({
-            conversations: state.conversations.map((c) => {
-              if (c.id === convId) {
-                return {
-                  ...c,
-                  messages: c.messages.map((m) =>
-                    m.id === assistantMsgId
-                      ? {
-                          ...m,
-                          content,
-                          isThinking: false,
-                          taskId: taskRes.task_id,
-                          status: "done",
-                        }
-                      : m
-                  ),
-                };
-              }
-              return c;
-            }),
-          }));
+          if (task.status === "succeeded" || task.status === "failed") {
+            closeStream();
+          }
+        } catch (err) {
+          console.error("Failed to parse task_snapshot", err);
         }
-      );
+      });
+
+      eventSource.addEventListener("node_started", (e) => {
+        try {
+          const payload = JSON.parse(e.data);
+          const nodeId = payload.node_id;
+          set((state) => ({
+            conversations: state.conversations.map((c) => {
+              if (c.id === convId) {
+                return {
+                  ...c,
+                  messages: c.messages.map((m) => {
+                    if (m.id === assistantMsgId) {
+                      const updatedNodes = m.nodes
+                        ? m.nodes.map((n) =>
+                            n.node_id === nodeId
+                              ? { ...n, status: "running" as const, input: payload.input || n.input }
+                              : n
+                          )
+                        : [{ node_id: nodeId, status: "running" as const, attempts: 1, input: payload.input }];
+                      return {
+                        ...m,
+                        nodes: updatedNodes,
+                        thoughts: [...(m.thoughts || []), `▶ 节点 [${nodeId}] 开始执行...`],
+                      };
+                    }
+                    return m;
+                  }),
+                };
+              }
+              return c;
+            }),
+          }));
+        } catch (err) {
+          console.error("Failed to parse node_started", err);
+        }
+      });
+
+      eventSource.addEventListener("node_waiting_confirmation", (e) => {
+        try {
+          const payload = JSON.parse(e.data);
+          const nodeId = payload.node_id;
+          const waitingNode: TaskNodeView = {
+            node_id: nodeId,
+            status: "waiting_confirmation",
+            attempts: 1,
+            input: payload.input,
+            output: payload.output,
+          };
+
+          set((state) => ({
+            conversations: state.conversations.map((c) => {
+              if (c.id === convId) {
+                return {
+                  ...c,
+                  messages: c.messages.map((m) => {
+                    if (m.id === assistantMsgId) {
+                      const updatedNodes = m.nodes
+                        ? m.nodes.map((n) =>
+                            n.node_id === nodeId
+                              ? {
+                                  ...n,
+                                  status: "waiting_confirmation" as const,
+                                  input: payload.input,
+                                  output: payload.output,
+                                }
+                              : n
+                          )
+                        : [waitingNode];
+
+                      // Check auto-confirm
+                      if (m.autoConfirm && m.taskId) {
+                        ShotPreviewService.confirmStep({
+                          task_id: m.taskId,
+                          node_id: nodeId,
+                        }).catch(console.error);
+                      }
+
+                      return {
+                        ...m,
+                        nodes: updatedNodes,
+                        waitingNode: m.autoConfirm ? null : waitingNode,
+                        thoughts: [
+                          ...(m.thoughts || []),
+                          `⏸ 节点 [${nodeId}] 执行完成，已暂停并等待确认`,
+                        ],
+                      };
+                    }
+                    return m;
+                  }),
+                };
+              }
+              return c;
+            }),
+          }));
+        } catch (err) {
+          console.error("Failed to parse node_waiting_confirmation", err);
+        }
+      });
+
+      eventSource.addEventListener("node_output_adjusted", (e) => {
+        try {
+          const payload = JSON.parse(e.data);
+          const nodeId = payload.node_id;
+          set((state) => ({
+            conversations: state.conversations.map((c) => {
+              if (c.id === convId) {
+                return {
+                  ...c,
+                  messages: c.messages.map((m) => {
+                    if (m.id === assistantMsgId) {
+                      return {
+                        ...m,
+                        nodes: m.nodes?.map((n) =>
+                          n.node_id === nodeId ? { ...n, output: payload.output } : n
+                        ),
+                        thoughts: [...(m.thoughts || []), `✏ 节点 [${nodeId}] 输出数据已更新调整`],
+                      };
+                    }
+                    return m;
+                  }),
+                };
+              }
+              return c;
+            }),
+          }));
+        } catch (err) {
+          console.error("Failed to parse node_output_adjusted", err);
+        }
+      });
+
+      eventSource.addEventListener("node_succeeded", (e) => {
+        try {
+          const payload = JSON.parse(e.data);
+          const nodeId = payload.node_id;
+          set((state) => ({
+            conversations: state.conversations.map((c) => {
+              if (c.id === convId) {
+                return {
+                  ...c,
+                  messages: c.messages.map((m) => {
+                    if (m.id === assistantMsgId) {
+                      const updatedNodes = m.nodes?.map((n) =>
+                        n.node_id === nodeId
+                          ? { ...n, status: "succeeded" as const, output: payload.output || n.output }
+                          : n
+                      );
+                      return {
+                        ...m,
+                        nodes: updatedNodes,
+                        waitingNode: m.waitingNode?.node_id === nodeId ? null : m.waitingNode,
+                        thoughts: [...(m.thoughts || []), `✔ 节点 [${nodeId}] 确认通过，已完成`],
+                      };
+                    }
+                    return m;
+                  }),
+                };
+              }
+              return c;
+            }),
+          }));
+        } catch (err) {
+          console.error("Failed to parse node_succeeded", err);
+        }
+      });
+
+      eventSource.addEventListener("task_succeeded", (e) => {
+        try {
+          const payload = JSON.parse(e.data);
+          set((state) => ({
+            isGenerating: false,
+            conversations: state.conversations.map((c) => {
+              if (c.id === convId) {
+                return {
+                  ...c,
+                  messages: c.messages.map((m) => {
+                    if (m.id === assistantMsgId) {
+                      return {
+                        ...m,
+                        status: "done",
+                        isThinking: false,
+                        waitingNode: null,
+                        artifacts: payload.artifacts || m.artifacts || [],
+                        content:
+                          "### 🎬 分镜预览工作流已全部执行完成\n\n已成功编排各 Agent 节点并完成渲染与视频转码，最终视频文件已生成。请在下方下载查看。",
+                        thoughts: [...(m.thoughts || []), "🎉 全流程执行成功，已发布分镜视频制品！"],
+                      };
+                    }
+                    return m;
+                  }),
+                };
+              }
+              return c;
+            }),
+          }));
+          closeStream();
+        } catch (err) {
+          console.error("Failed to parse task_succeeded", err);
+          closeStream();
+        }
+      });
+
+      eventSource.addEventListener("task_failed", (e) => {
+        try {
+          const payload = JSON.parse(e.data);
+          set((state) => ({
+            isGenerating: false,
+            conversations: state.conversations.map((c) => {
+              if (c.id === convId) {
+                return {
+                  ...c,
+                  messages: c.messages.map((m) => {
+                    if (m.id === assistantMsgId) {
+                      return {
+                        ...m,
+                        status: "error",
+                        isThinking: false,
+                        content: `### ❌ 分镜生成任务失败\n\n**错误详情**：${payload.error || "执行过程中发生异常"}`,
+                        thoughts: [...(m.thoughts || []), `✖ 任务失败: ${payload.error || "未知异常"}`],
+                      };
+                    }
+                    return m;
+                  }),
+                };
+              }
+              return c;
+            }),
+          }));
+          closeStream();
+        } catch (err) {
+          console.error("Failed to parse task_failed", err);
+          closeStream();
+        }
+      });
+
+      eventSource.onerror = (err) => {
+        console.warn("EventSource error:", err);
+      };
     } catch {
       set((state) => ({
         conversations: state.conversations.map((c) => {
@@ -237,11 +512,114 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
         }),
       }));
     } finally {
-      set({ isGenerating: false });
+      // isGenerating will be closed by closeStream when task finishes or on error
     }
   },
 
+  confirmNodeStep: async (messageId: string, nodeId: string, adjustedOutput?: string) => {
+    const { conversations, activeConversationId } = get();
+    const conv = conversations.find((c) => c.id === activeConversationId);
+    const msg = conv?.messages.find((m) => m.id === messageId);
+    if (!msg || !msg.taskId) return;
+
+    await ShotPreviewService.confirmStep({
+      task_id: msg.taskId,
+      node_id: nodeId,
+      adjusted_output: adjustedOutput,
+    });
+
+    set((state) => ({
+      conversations: state.conversations.map((c) => {
+        if (c.id === activeConversationId) {
+          return {
+            ...c,
+            messages: c.messages.map((m) => {
+              if (m.id === messageId) {
+                return {
+                  ...m,
+                  waitingNode: null,
+                  nodes: m.nodes?.map((n) =>
+                    n.node_id === nodeId ? { ...n, status: "succeeded" as const } : n
+                  ),
+                };
+              }
+              return m;
+            }),
+          };
+        }
+        return c;
+      }),
+    }));
+  },
+
+  adjustNodeStep: async (messageId: string, nodeId: string, outputJson: string) => {
+    const { conversations, activeConversationId } = get();
+    const conv = conversations.find((c) => c.id === activeConversationId);
+    const msg = conv?.messages.find((m) => m.id === messageId);
+    if (!msg || !msg.taskId) return;
+
+    await ShotPreviewService.adjustStep({
+      task_id: msg.taskId,
+      node_id: nodeId,
+      output_json: outputJson,
+    });
+
+    set((state) => ({
+      conversations: state.conversations.map((c) => {
+        if (c.id === activeConversationId) {
+          return {
+            ...c,
+            messages: c.messages.map((m) => {
+              if (m.id === messageId) {
+                return {
+                  ...m,
+                  nodes: m.nodes?.map((n) =>
+                    n.node_id === nodeId ? { ...n, output: outputJson } : n
+                  ),
+                  waitingNode:
+                    m.waitingNode?.node_id === nodeId
+                      ? { ...m.waitingNode, output: outputJson }
+                      : m.waitingNode,
+                };
+              }
+              return m;
+            }),
+          };
+        }
+        return c;
+      }),
+    }));
+  },
+
+  toggleAutoConfirm: (messageId: string) => {
+    set((state) => ({
+      conversations: state.conversations.map((c) => {
+        if (c.id === state.activeConversationId) {
+          return {
+            ...c,
+            messages: c.messages.map((m) => {
+              if (m.id === messageId) {
+                const nextAuto = !m.autoConfirm;
+                if (nextAuto && m.waitingNode && m.taskId) {
+                  ShotPreviewService.confirmStep({
+                    task_id: m.taskId,
+                    node_id: m.waitingNode.node_id,
+                  }).catch(console.error);
+                }
+                return { ...m, autoConfirm: nextAuto };
+              }
+              return m;
+            }),
+          };
+        }
+        return c;
+      }),
+    }));
+  },
+
   stopGenerating: () => {
+    activeEventSources.forEach((source) => source.close());
+    activeEventSources.clear();
     set({ isGenerating: false });
   },
 }));

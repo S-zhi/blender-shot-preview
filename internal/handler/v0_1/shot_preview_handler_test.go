@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/S-zhi/blender-shot-preview/internal/service"
+	"github.com/S-zhi/blender-shot-preview/internal/service/pipeline"
 	api "github.com/S-zhi/blender-shot-preview/kitex_gen/handler/v0_1"
 )
 
@@ -28,6 +29,16 @@ func (s *stubShotPreviewService) CancelTask(context.Context, service.CancelTaskR
 }
 func (s *stubShotPreviewService) RetryTask(context.Context, service.RetryTaskRequest) (service.TaskView, error) {
 	return s.task, s.err
+}
+func (s *stubShotPreviewService) ConfirmStep(context.Context, service.ConfirmStepRequest) error {
+	return s.err
+}
+func (s *stubShotPreviewService) AdjustStep(context.Context, service.AdjustStepRequest) error {
+	return s.err
+}
+func (s *stubShotPreviewService) SubscribeEvents(context.Context, string) (<-chan pipeline.PipelineEvent, func(), error) {
+	ch := make(chan pipeline.PipelineEvent)
+	return ch, func() { close(ch) }, s.err
 }
 
 func newTestHandler(svc service.ShotPreviewService) *ShotPreviewHandler {

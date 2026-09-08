@@ -13,6 +13,7 @@ import (
 
 	handlerv0_1 "github.com/S-zhi/blender-shot-preview/internal/handler/v0_1"
 	"github.com/S-zhi/blender-shot-preview/internal/service"
+	"github.com/S-zhi/blender-shot-preview/internal/service/pipeline"
 	api "github.com/S-zhi/blender-shot-preview/kitex_gen/handler/v0_1"
 )
 
@@ -55,6 +56,10 @@ func (g *HTTPGateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (g *HTTPGateway) routes() {
 	g.mux.HandleFunc("/health", g.handleHealth)
 	g.mux.HandleFunc("/api/v0_1/shot-preview/task", g.handleShotPreviewTask)
+	g.mux.HandleFunc("/api/v0_1/shot-preview/task/stream", g.handleShotPreviewStream)
+	g.mux.HandleFunc("/api/v0_1/shot-preview/task/node/confirm", g.handleNodeConfirm)
+	g.mux.HandleFunc("/api/v0_1/shot-preview/task/node/adjust", g.handleNodeAdjust)
+	g.mux.HandleFunc("/api/v0_1/shot-preview/artifacts/download", g.handleArtifactDownload)
 	g.mux.HandleFunc("/api/v0_1/llm-gateway/key", g.handleLLMKey)
 	g.mux.HandleFunc("/api/v0_1/assets", g.handleAssets)
 	g.mux.HandleFunc("/api/v0_1/assets/upload", g.handleAssetUpload)
@@ -339,6 +344,197 @@ func (g *HTTPGateway) handleAssetStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, res)
+}
+
+func (g *HTTPGateway) handleShotPreviewStream(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	taskID := strings.TrimSpace(r.URL.Query().Get("task_id"))
+	if taskID == "" {
+		http.Error(w, "task_id is required", http.StatusBadRequest)
+		return
+	}
+	userID := strings.TrimSpace(r.URL.Query().Get("user_id"))
+	if userID == "" {
+		userID = "default_user_001"
+	}
+
+	if g.shotHandler == nil || g.shotHandler.Service() == nil {
+		http.Error(w, "shot preview service unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	shotSvc := g.shotHandler.Service()
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "Streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+
+	// 1. Send current task snapshot if exists
+	if currentTask, err := shotSvc.GetTask(r.Context(), service.GetTaskRequest{UserID: userID, TaskID: taskID}); err == nil {
+		data, _ := json.Marshal(map[string]any{
+			"type": "task_snapshot",
+			"task": currentTask,
+		})
+		fmt.Fprintf(w, "event: task_snapshot\ndata: %s\n\n", string(data))
+		flusher.Flush()
+		if currentTask.Status == service.TaskStatusSucceeded || currentTask.Status == service.TaskStatusFailed || currentTask.Status == service.TaskStatusCancelled {
+			return
+		}
+	}
+
+	// 2. Subscribe to real-time events
+	events, unsub, err := shotSvc.SubscribeEvents(r.Context(), taskID)
+	if err != nil {
+		http.Error(w, "failed to subscribe: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer unsub()
+
+	ticker := time.NewTicker(15 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case event, ok := <-events:
+			if !ok {
+				return
+			}
+			data, _ := json.Marshal(event)
+			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event.Type, string(data))
+			flusher.Flush()
+			if event.Type == pipeline.EventTaskSucceeded || event.Type == pipeline.EventTaskFailed {
+				return
+			}
+		case <-ticker.C:
+			fmt.Fprintf(w, ": keep-alive\n\n")
+			flusher.Flush()
+		}
+	}
+}
+
+type confirmNodePayload struct {
+	UserID         string  `json:"user_id"`
+	TaskID         string  `json:"task_id"`
+	NodeID         string  `json:"node_id"`
+	AdjustedOutput *string `json:"adjusted_output,omitempty"`
+}
+
+func (g *HTTPGateway) handleNodeConfirm(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req confirmNodePayload
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json: " + err.Error()})
+		return
+	}
+	if req.TaskID == "" || req.NodeID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "task_id and node_id are required"})
+		return
+	}
+	if req.UserID == "" {
+		req.UserID = "default_user_001"
+	}
+	if g.shotHandler == nil || g.shotHandler.Service() == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "service unavailable"})
+		return
+	}
+	err := g.shotHandler.Service().ConfirmStep(r.Context(), service.ConfirmStepRequest{
+		UserID:         req.UserID,
+		TaskID:         req.TaskID,
+		NodeID:         req.NodeID,
+		AdjustedOutput: req.AdjustedOutput,
+	})
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+type adjustNodePayload struct {
+	UserID     string `json:"user_id"`
+	TaskID     string `json:"task_id"`
+	NodeID     string `json:"node_id"`
+	OutputJSON string `json:"output_json"`
+}
+
+func (g *HTTPGateway) handleNodeAdjust(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req adjustNodePayload
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json: " + err.Error()})
+		return
+	}
+	if req.TaskID == "" || req.NodeID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "task_id and node_id are required"})
+		return
+	}
+	if req.UserID == "" {
+		req.UserID = "default_user_001"
+	}
+	if g.shotHandler == nil || g.shotHandler.Service() == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "service unavailable"})
+		return
+	}
+	err := g.shotHandler.Service().AdjustStep(r.Context(), service.AdjustStepRequest{
+		UserID:     req.UserID,
+		TaskID:     req.TaskID,
+		NodeID:     req.NodeID,
+		OutputJSON: req.OutputJSON,
+	})
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (g *HTTPGateway) handleArtifactDownload(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	taskID := strings.TrimSpace(r.URL.Query().Get("task_id"))
+	name := strings.TrimSpace(r.URL.Query().Get("name"))
+	if taskID == "" || name == "" {
+		http.Error(w, "task_id and name are required", http.StatusBadRequest)
+		return
+	}
+	cleanName := filepath.Base(name)
+	cleanTaskID := filepath.Base(taskID)
+
+	workspaceDir := os.Getenv("BLENDER_WORKSPACE")
+	if workspaceDir == "" {
+		workspaceDir = filepath.Join(os.TempDir(), "blender-shot-preview")
+	}
+	filePath := filepath.Join(workspaceDir, "tasks", cleanTaskID, cleanName)
+
+	fileInfo, err := os.Stat(filePath)
+	if err != nil || fileInfo.IsDir() {
+		http.Error(w, "Artifact not found", http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", cleanName))
+	w.Header().Set("Content-Type", "video/mp4")
+	http.ServeFile(w, r, filePath)
 }
 
 func writeJSON(w http.ResponseWriter, status int, data interface{}) {

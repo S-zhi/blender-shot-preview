@@ -41,11 +41,12 @@ func (s TaskStatus) Terminal() bool {
 type NodeStatus string
 
 const (
-	NodeStatusPending   NodeStatus = "pending"
-	NodeStatusRunning   NodeStatus = "running"
-	NodeStatusSucceeded NodeStatus = "succeeded"
-	NodeStatusFailed    NodeStatus = "failed"
-	NodeStatusCancelled NodeStatus = "cancelled"
+	NodeStatusPending             NodeStatus = "pending"
+	NodeStatusRunning             NodeStatus = "running"
+	NodeStatusWaitingConfirmation NodeStatus = "waiting_confirmation"
+	NodeStatusSucceeded           NodeStatus = "succeeded"
+	NodeStatusFailed              NodeStatus = "failed"
+	NodeStatusCancelled           NodeStatus = "cancelled"
 )
 
 func (s NodeStatus) Terminal() bool {
@@ -235,15 +236,16 @@ type Node struct {
 
 // Task is the persisted asynchronous production request.
 type Task struct {
-	ID              string
-	IdempotencyKey  string
-	Input           Snapshot
-	Nodes           []Node
-	Status          TaskStatus
-	CancelRequested bool
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
-	FinishedAt      *time.Time
+	ID                  string
+	IdempotencyKey      string
+	Input               Snapshot
+	Nodes               []Node
+	Status              TaskStatus
+	RequireConfirmation bool
+	CancelRequested     bool
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
+	FinishedAt          *time.Time
 }
 
 func (t Task) Node(id NodeID) (Node, bool) {
@@ -257,9 +259,41 @@ func (t Task) Node(id NodeID) (Node, bool) {
 
 // Submission accepts only data that can be persisted and recovered later.
 type Submission struct {
-	IdempotencyKey string
-	Input          Snapshot
-	Workflow       Workflow
+	IdempotencyKey      string
+	Input               Snapshot
+	Workflow            Workflow
+	RequireConfirmation bool
+}
+
+type PipelineEventType string
+
+const (
+	EventTaskStarted        PipelineEventType = "task_started"
+	EventNodeStarted        PipelineEventType = "node_started"
+	EventNodeWaitingConfirm PipelineEventType = "node_waiting_confirmation"
+	EventNodeOutputAdjusted PipelineEventType = "node_output_adjusted"
+	EventNodeSucceeded      PipelineEventType = "node_succeeded"
+	EventNodeFailed         PipelineEventType = "node_failed"
+	EventTaskSucceeded      PipelineEventType = "task_succeeded"
+	EventTaskFailed         PipelineEventType = "task_failed"
+)
+
+type ArtifactSnapshot struct {
+	Type string `json:"type"`
+	Name string `json:"name"`
+	URI  string `json:"uri"`
+}
+
+type PipelineEvent struct {
+	TaskID    string             `json:"task_id"`
+	Type      PipelineEventType  `json:"type"`
+	NodeID    NodeID             `json:"node_id,omitempty"`
+	Status    string             `json:"status,omitempty"`
+	Input     string             `json:"input,omitempty"`
+	Output    string             `json:"output,omitempty"`
+	Error     string             `json:"error,omitempty"`
+	Artifacts []ArtifactSnapshot `json:"artifacts,omitempty"`
+	Timestamp time.Time          `json:"timestamp"`
 }
 
 // DependencyOutputs are passed by value to invokers and represent the exact

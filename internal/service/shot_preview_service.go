@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"time"
@@ -46,9 +47,10 @@ func (s *ShotPreviewServiceImpl) CreateTask(ctx context.Context, request CreateT
 		return CreateTaskResult{RequestID: requestID, Status: CreateStatusRejected}, err
 	}
 	task, created, err := s.runner.Submit(ctx, pipeline.Submission{
-		IdempotencyKey: userID + ":" + requestID,
-		Input:          input,
-		Workflow:       pipeline.ShotPreviewWorkflow(input.JSON),
+		IdempotencyKey:      userID + ":" + requestID,
+		Input:               input,
+		Workflow:            pipeline.ShotPreviewWorkflow(input.JSON),
+		RequireConfirmation: request.RequireConfirmation,
 	})
 	if err != nil {
 		if errors.Is(err, pipeline.ErrIdempotencyConflict) {
@@ -59,6 +61,40 @@ func (s *ShotPreviewServiceImpl) CreateTask(ctx context.Context, request CreateT
 	return CreateTaskResult{
 		TaskID: task.ID, RequestID: requestID, Status: CreateStatusAccepted, Replayed: !created,
 	}, nil
+}
+
+func (s *ShotPreviewServiceImpl) ConfirmStep(ctx context.Context, request ConfirmStepRequest) error {
+	if _, err := s.taskForUser(ctx, request.UserID, request.TaskID); err != nil {
+		return err
+	}
+	var snapshot *pipeline.Snapshot
+	if request.AdjustedOutput != nil && len(*request.AdjustedOutput) > 0 {
+		sn, err := pipeline.NewSnapshot(json.RawMessage(*request.AdjustedOutput))
+		if err != nil {
+			return err
+		}
+		snapshot = &sn
+	}
+	return s.runner.ConfirmNode(ctx, request.TaskID, pipeline.NodeID(request.NodeID), snapshot)
+}
+
+func (s *ShotPreviewServiceImpl) AdjustStep(ctx context.Context, request AdjustStepRequest) error {
+	if _, err := s.taskForUser(ctx, request.UserID, request.TaskID); err != nil {
+		return err
+	}
+	sn, err := pipeline.NewSnapshot(json.RawMessage(request.OutputJSON))
+	if err != nil {
+		return err
+	}
+	return s.runner.AdjustNodeOutput(ctx, request.TaskID, pipeline.NodeID(request.NodeID), sn)
+}
+
+func (s *ShotPreviewServiceImpl) SubscribeEvents(ctx context.Context, taskID string) (<-chan pipeline.PipelineEvent, func(), error) {
+	if s == nil || s.runner == nil {
+		return nil, nil, ErrPipelineUnavailable
+	}
+	ch, unsub := s.runner.Subscribe(taskID)
+	return ch, unsub, nil
 }
 
 func (s *ShotPreviewServiceImpl) GetTask(ctx context.Context, request GetTaskRequest) (TaskView, error) {
@@ -147,6 +183,14 @@ func taskView(task pipeline.Task) TaskView {
 			StartedAt:  cloneTime(node.StartedAt),
 			FinishedAt: cloneTime(node.FinishedAt),
 		}
+		if len(node.Input.JSON) > 0 {
+			inStr := string(node.Input.JSON)
+			nodeView.Input = &inStr
+		}
+		if node.Output != nil && len(node.Output.JSON) > 0 {
+			outStr := string(node.Output.JSON)
+			nodeView.Output = &outStr
+		}
 		if node.Status == pipeline.NodeStatusFailed {
 			msg := strings.TrimSpace(node.Error)
 			if msg == "" {
@@ -160,6 +204,13 @@ func taskView(task pipeline.Task) TaskView {
 			}
 		}
 		view.Nodes = append(view.Nodes, nodeView)
+	}
+	if task.Status == pipeline.TaskStatusSucceeded {
+		view.Artifacts = append(view.Artifacts, ArtifactView{
+			Type: "video",
+			Name: "shot-preview.mp4",
+			URI:  "/api/v0_1/shot-preview/artifacts/download?task_id=" + task.ID + "&name=shot-preview.mp4",
+		})
 	}
 	return view
 }

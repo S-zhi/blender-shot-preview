@@ -52,6 +52,10 @@ func NewShotPreviewHandlerWithRequestIDGenerator(svc service.ShotPreviewService,
 	return &ShotPreviewHandler{service: svc, newRequestID: generator}
 }
 
+func (h *ShotPreviewHandler) Service() service.ShotPreviewService {
+	return h.service
+}
+
 func (h *ShotPreviewHandler) CreateShotPreviewTask(ctx context.Context, request *api.CreateShotPreviewTaskRequest) (*api.CreateShotPreviewTaskResponse, error) {
 	if request == nil {
 		return nil, &InvalidArgumentError{Field: "request"}
@@ -75,6 +79,7 @@ func (h *ShotPreviewHandler) CreateShotPreviewTask(ctx context.Context, request 
 	result, err := h.service.CreateTask(ctx, service.CreateTaskRequest{
 		UserID: userID, Prompt: prompt, ConversationID: strings.TrimSpace(request.GetConversationId()), RequestID: requestID,
 		WorkflowID: strings.TrimSpace(request.GetWorkflowId()), WorkflowVersion: strings.TrimSpace(request.GetWorkflowVersion()),
+		RequireConfirmation: true,
 	})
 	if errors.Is(err, service.ErrInvalidTaskRequest) {
 		return &api.CreateShotPreviewTaskResponse{TaskId: result.TaskID, Status: api.TaskStatus_REJECTED, RequestId: &requestID}, nil

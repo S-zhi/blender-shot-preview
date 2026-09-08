@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -26,21 +27,25 @@ type Runner struct {
 	now        func() time.Time
 	newTaskID  func() (string, error)
 
-	mu        sync.Mutex
-	active    map[string]execution
-	taskLocks map[string]*sync.Mutex
+	mu           sync.Mutex
+	active       map[string]execution
+	taskLocks    map[string]*sync.Mutex
+	subscribers  map[string][]chan PipelineEvent
+	confirmChans map[string]chan struct{}
 }
 
 func NewRunner(repository Repository, agents AgentInvoker, steps StepInvoker, tools ToolInvoker) *Runner {
 	return &Runner{
-		repository: repository,
-		agents:     agents,
-		steps:      steps,
-		tools:      tools,
-		now:        time.Now,
-		newTaskID:  newTaskID,
-		active:     make(map[string]execution),
-		taskLocks:  make(map[string]*sync.Mutex),
+		repository:   repository,
+		agents:       agents,
+		steps:        steps,
+		tools:        tools,
+		now:          time.Now,
+		newTaskID:    newTaskID,
+		active:       make(map[string]execution),
+		taskLocks:    make(map[string]*sync.Mutex),
+		subscribers:  make(map[string][]chan PipelineEvent),
+		confirmChans: make(map[string]chan struct{}),
 	}
 }
 
@@ -69,7 +74,7 @@ func (r *Runner) Submit(ctx context.Context, submission Submission) (Task, bool,
 	now := r.now().UTC()
 	task := Task{
 		ID: taskID, IdempotencyKey: submission.IdempotencyKey, Input: input,
-		Status: TaskStatusPending, CreatedAt: now, UpdatedAt: now,
+		Status: TaskStatusPending, RequireConfirmation: submission.RequireConfirmation, CreatedAt: now, UpdatedAt: now,
 		Nodes: make([]Node, 0, len(submission.Workflow.Nodes)),
 	}
 	for _, spec := range submission.Workflow.Nodes {
@@ -90,6 +95,12 @@ func (r *Runner) Submit(ctx context.Context, submission Submission) (Task, bool,
 	if err != nil {
 		return Task{}, false, err
 	}
+	r.broadcast(PipelineEvent{
+		TaskID:    stored.ID,
+		Type:      EventTaskStarted,
+		Status:    string(stored.Status),
+		Timestamp: now,
+	})
 	if !stored.Status.Terminal() {
 		r.start(stored.ID)
 	}
@@ -145,6 +156,15 @@ func (r *Runner) Cancel(ctx context.Context, taskID string) error {
 	}
 	r.mu.Lock()
 	active, exists := r.active[taskID]
+	for key, ch := range r.confirmChans {
+		if strings.HasPrefix(key, taskID+":") {
+			select {
+			case ch <- struct{}{}:
+			default:
+			}
+			delete(r.confirmChans, key)
+		}
+	}
 	r.mu.Unlock()
 	if exists {
 		active.cancel()
@@ -366,6 +386,18 @@ func (r *Runner) startNodes(taskID string, ready []NodeID) ([]Node, error) {
 		}
 		return nil
 	})
+	if err == nil {
+		for _, n := range started {
+			r.broadcast(PipelineEvent{
+				TaskID:    taskID,
+				Type:      EventNodeStarted,
+				NodeID:    n.ID,
+				Status:    string(n.Status),
+				Input:     string(n.Input.JSON),
+				Timestamp: r.now().UTC(),
+			})
+		}
+	}
 	return started, err
 }
 
@@ -375,7 +407,195 @@ func (r *Runner) executeNode(ctx context.Context, taskID string, node Node) erro
 		return err
 	}
 	output, invokeErr := r.invoke(ctx, task, node)
-	return r.finishNode(taskID, node.ID, output, invokeErr)
+	if invokeErr != nil {
+		return r.finishNode(taskID, node.ID, output, invokeErr)
+	}
+
+	if task.RequireConfirmation && nodeRequiresConfirmation(node) {
+		if err := r.setNodeWaitingConfirmation(taskID, node.ID, output); err != nil {
+			return err
+		}
+		confirmChan := r.getConfirmChan(taskID, node.ID)
+		select {
+		case <-confirmChan:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+
+	return r.finishNode(taskID, node.ID, output, nil)
+}
+
+func nodeRequiresConfirmation(node Node) bool {
+	return node.Invocation.Kind == InvocationAgent || node.ID == NodeInspect
+}
+
+func (r *Runner) setNodeWaitingConfirmation(taskID string, nodeID NodeID, output Snapshot) error {
+	var inputJSON string
+	err := r.withTask(taskID, func(task *Task) error {
+		for i := range task.Nodes {
+			node := &task.Nodes[i]
+			if node.ID == nodeID {
+				now := r.now().UTC()
+				node.Status = NodeStatusWaitingConfirmation
+				copyOut := cloneSnapshot(output)
+				node.Output = &copyOut
+				inputJSON = string(node.Input.JSON)
+				task.UpdatedAt = now
+				return nil
+			}
+		}
+		return errors.New("node not found")
+	})
+	if err != nil {
+		return err
+	}
+	r.broadcast(PipelineEvent{
+		TaskID:    taskID,
+		Type:      EventNodeWaitingConfirm,
+		NodeID:    nodeID,
+		Status:    string(NodeStatusWaitingConfirmation),
+		Input:     inputJSON,
+		Output:    string(output.JSON),
+		Timestamp: r.now().UTC(),
+	})
+	return nil
+}
+
+func (r *Runner) ConfirmNode(ctx context.Context, taskID string, nodeID NodeID, adjustedOutput *Snapshot) error {
+	var confirmedOutput Snapshot
+	err := r.withTask(taskID, func(task *Task) error {
+		if task.Status.Terminal() || task.CancelRequested {
+			return ErrTaskAlreadyTerminal
+		}
+		for i := range task.Nodes {
+			node := &task.Nodes[i]
+			if node.ID == nodeID {
+				if node.Status != NodeStatusWaitingConfirmation {
+					return errors.New("node is not waiting for confirmation")
+				}
+				now := r.now().UTC()
+				node.FinishedAt = timePointer(now)
+				node.Status = NodeStatusSucceeded
+				if adjustedOutput != nil && len(adjustedOutput.JSON) > 0 {
+					copyOut := cloneSnapshot(*adjustedOutput)
+					node.Output = &copyOut
+				}
+				if node.Output != nil {
+					confirmedOutput = cloneSnapshot(*node.Output)
+				}
+				task.UpdatedAt = now
+				return nil
+			}
+		}
+		return errors.New("node not found")
+	})
+	if err != nil {
+		return err
+	}
+
+	r.signalConfirm(taskID, nodeID)
+
+	r.broadcast(PipelineEvent{
+		TaskID:    taskID,
+		Type:      EventNodeSucceeded,
+		NodeID:    nodeID,
+		Status:    string(NodeStatusSucceeded),
+		Output:    string(confirmedOutput.JSON),
+		Timestamp: r.now().UTC(),
+	})
+	return nil
+}
+
+func (r *Runner) AdjustNodeOutput(ctx context.Context, taskID string, nodeID NodeID, newOutput Snapshot) error {
+	err := r.withTask(taskID, func(task *Task) error {
+		if task.Status.Terminal() || task.CancelRequested {
+			return ErrTaskAlreadyTerminal
+		}
+		for i := range task.Nodes {
+			node := &task.Nodes[i]
+			if node.ID == nodeID {
+				copyOut := cloneSnapshot(newOutput)
+				node.Output = &copyOut
+				task.UpdatedAt = r.now().UTC()
+				return nil
+			}
+		}
+		return errors.New("node not found")
+	})
+	if err != nil {
+		return err
+	}
+	r.broadcast(PipelineEvent{
+		TaskID:    taskID,
+		Type:      EventNodeOutputAdjusted,
+		NodeID:    nodeID,
+		Output:    string(newOutput.JSON),
+		Timestamp: r.now().UTC(),
+	})
+	return nil
+}
+
+func (r *Runner) getConfirmChan(taskID string, nodeID NodeID) chan struct{} {
+	key := taskID + ":" + string(nodeID)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	ch, ok := r.confirmChans[key]
+	if !ok {
+		ch = make(chan struct{}, 1)
+		r.confirmChans[key] = ch
+	}
+	return ch
+}
+
+func (r *Runner) signalConfirm(taskID string, nodeID NodeID) {
+	key := taskID + ":" + string(nodeID)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if ch, ok := r.confirmChans[key]; ok {
+		select {
+		case ch <- struct{}{}:
+		default:
+		}
+		delete(r.confirmChans, key)
+	}
+}
+
+func (r *Runner) Subscribe(taskID string) (<-chan PipelineEvent, func()) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	ch := make(chan PipelineEvent, 64)
+	r.subscribers[taskID] = append(r.subscribers[taskID], ch)
+	unsubscribe := func() {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		subs := r.subscribers[taskID]
+		for i, sub := range subs {
+			if sub == ch {
+				r.subscribers[taskID] = append(subs[:i], subs[i+1:]...)
+				close(ch)
+				break
+			}
+		}
+		if len(r.subscribers[taskID]) == 0 {
+			delete(r.subscribers, taskID)
+		}
+	}
+	return ch, unsubscribe
+}
+
+func (r *Runner) broadcast(event PipelineEvent) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if subs, ok := r.subscribers[event.TaskID]; ok {
+		for _, ch := range subs {
+			select {
+			case ch <- event:
+			default:
+			}
+		}
+	}
 }
 
 func (r *Runner) invoke(ctx context.Context, task Task, node Node) (Snapshot, error) {
@@ -414,13 +634,18 @@ func (r *Runner) invoke(ctx context.Context, task Task, node Node) (Snapshot, er
 }
 
 func (r *Runner) finishNode(taskID string, nodeID NodeID, output Snapshot, invokeErr error) error {
-	return r.withTask(taskID, func(task *Task) error {
+	var (
+		finalNodeStatus NodeStatus
+		nodeError       string
+		outSnapshot     Snapshot
+	)
+	err := r.withTask(taskID, func(task *Task) error {
 		if task.CancelRequested || task.Status.Terminal() {
 			return nil
 		}
 		for index := range task.Nodes {
 			node := &task.Nodes[index]
-			if node.ID != nodeID || node.Status != NodeStatusRunning {
+			if node.ID != nodeID || (node.Status != NodeStatusRunning && node.Status != NodeStatusWaitingConfirmation) {
 				continue
 			}
 			now := r.now().UTC()
@@ -430,13 +655,18 @@ func (r *Runner) finishNode(taskID string, nodeID NodeID, output Snapshot, invok
 				node.Output = &copyOfOutput
 				node.Status = NodeStatusSucceeded
 				node.Error = ""
+				finalNodeStatus = NodeStatusSucceeded
+				outSnapshot = cloneSnapshot(output)
 			} else {
 				node.Error = strings.TrimSpace(invokeErr.Error())
+				nodeError = node.Error
 				if node.Attempts < node.MaxAttempts {
 					node.Status = NodeStatusPending
 					node.FinishedAt = nil
+					finalNodeStatus = NodeStatusPending
 				} else {
 					node.Status = NodeStatusFailed
+					finalNodeStatus = NodeStatusFailed
 				}
 			}
 			task.UpdatedAt = now
@@ -444,18 +674,52 @@ func (r *Runner) finishNode(taskID string, nodeID NodeID, output Snapshot, invok
 		}
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+	if finalNodeStatus == NodeStatusSucceeded {
+		r.broadcast(PipelineEvent{
+			TaskID:    taskID,
+			Type:      EventNodeSucceeded,
+			NodeID:    nodeID,
+			Status:    string(NodeStatusSucceeded),
+			Output:    string(outSnapshot.JSON),
+			Timestamp: r.now().UTC(),
+		})
+	} else if finalNodeStatus == NodeStatusFailed {
+		r.broadcast(PipelineEvent{
+			TaskID:    taskID,
+			Type:      EventNodeFailed,
+			NodeID:    nodeID,
+			Status:    string(NodeStatusFailed),
+			Error:     nodeError,
+			Timestamp: r.now().UTC(),
+		})
+	}
+	return nil
 }
 
 func (r *Runner) completeIfBlocked(taskID string) error {
-	return r.withTask(taskID, func(task *Task) error {
+	var (
+		finalStatus TaskStatus
+		failedError string
+	)
+	err := r.withTask(taskID, func(task *Task) error {
 		if task.Status.Terminal() || task.CancelRequested {
 			return nil
+		}
+		for _, node := range task.Nodes {
+			if node.Status == NodeStatusRunning || node.Status == NodeStatusWaitingConfirmation {
+				return nil
+			}
 		}
 		now := r.now().UTC()
 		for _, node := range task.Nodes {
 			if node.Status == NodeStatusFailed {
 				task.Status = TaskStatusFailed
 				task.FinishedAt = timePointer(now)
+				finalStatus = TaskStatusFailed
+				failedError = node.Error
 				for index := range task.Nodes {
 					if task.Nodes[index].Status == NodeStatusPending {
 						task.Nodes[index].Status = NodeStatusCancelled
@@ -477,9 +741,37 @@ func (r *Runner) completeIfBlocked(taskID string) error {
 			task.Status = TaskStatusSucceeded
 			task.FinishedAt = timePointer(now)
 			task.UpdatedAt = now
+			finalStatus = TaskStatusSucceeded
 		}
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+	if finalStatus == TaskStatusSucceeded {
+		r.broadcast(PipelineEvent{
+			TaskID: taskID,
+			Type:   EventTaskSucceeded,
+			Status: string(TaskStatusSucceeded),
+			Artifacts: []ArtifactSnapshot{
+				{
+					Type: "video",
+					Name: "shot-preview.mp4",
+					URI:  "/api/v0_1/shot-preview/artifacts/download?task_id=" + taskID + "&name=shot-preview.mp4",
+				},
+			},
+			Timestamp: r.now().UTC(),
+		})
+	} else if finalStatus == TaskStatusFailed {
+		r.broadcast(PipelineEvent{
+			TaskID:    taskID,
+			Type:      EventTaskFailed,
+			Status:    string(TaskStatusFailed),
+			Error:     failedError,
+			Timestamp: r.now().UTC(),
+		})
+	}
+	return nil
 }
 
 func (r *Runner) withTask(taskID string, operation func(*Task) error) error {
