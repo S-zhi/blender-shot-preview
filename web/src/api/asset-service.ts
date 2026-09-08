@@ -71,6 +71,7 @@ export class AssetService {
     const response = await fetch("/api/v0_1/assets/upload", {
       method: "POST",
       body: formData,
+      credentials: "include",
     });
 
     if (!response.ok) {

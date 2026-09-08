@@ -159,15 +159,40 @@ func main() {
 		}
 	}()
 
-	// 3. Start HTTP Gateway on 127.0.0.1:8888 for Web Frontend
+	// 3. Start HTTP Gateway for Web Frontend
+	serverAddr := strings.TrimSpace(os.Getenv("SERVER_ADDR"))
+	if serverAddr == "" {
+		serverAddr = "127.0.0.1:8888"
+	}
+
+	accessToken := strings.TrimSpace(os.Getenv("ACCESS_TOKEN"))
+	disableAuth := strings.EqualFold(strings.TrimSpace(os.Getenv("DISABLE_AUTH")), "true")
+
+	if accessToken == "" && !disableAuth {
+		key := make([]byte, 16)
+		if _, err := rand.Read(key); err == nil {
+			accessToken = "bspe_" + hex.EncodeToString(key)
+		} else {
+			accessToken = "bspe_access_token_secure"
+		}
+	}
+
 	httpGateway := gateway.NewHTTPGateway(shotHandler, keyHandler, assetHandler, runtime.conversations)
 	httpGateway.SetAssetsDir(filepath.Join(getWorkspaceDir(), "assets"))
+	if accessToken != "" {
+		httpGateway.SetAccessToken(accessToken)
+		log.Println("========================================================================")
+		log.Printf("🔑 [Access Control] Server Access Token: %s\n", accessToken)
+		log.Println("👉 打开 Web 前端界面时，请输入此 Access Token 获得访问凭证 Cookie。")
+		log.Println("========================================================================")
+	}
+
 	httpServer := &http.Server{
-		Addr:    "127.0.0.1:8888",
+		Addr:    serverAddr,
 		Handler: httpGateway,
 	}
 
-	log.Println("[HTTP Gateway] API Server listening on http://127.0.0.1:8888")
+	log.Printf("[HTTP Gateway] API Server listening on http://%s\n", serverAddr)
 	if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatalf("[HTTP Gateway] ListenAndServe error: %v", err)
 	}

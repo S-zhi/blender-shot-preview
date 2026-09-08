@@ -290,3 +290,113 @@ func TestHTTPGateway_AssetUpload(t *testing.T) {
 	}
 }
 
+func TestHTTPGateway_Authentication(t *testing.T) {
+	assetSvc := service.NewAssetService(service.NewInMemoryAssetStore())
+	assetHandler := handlerv0_1.NewAssetHandler(assetSvc)
+
+	gw := NewHTTPGateway(nil, nil, assetHandler)
+	testToken := "bspe_secret_auth_token_999"
+	gw.SetAccessToken(testToken)
+
+	// 1. Without auth -> Protected route /api/v0_1/assets should return 401
+	reqUnauth := httptest.NewRequest(http.MethodGet, "/api/v0_1/assets", nil)
+	wUnauth := httptest.NewRecorder()
+	gw.ServeHTTP(wUnauth, reqUnauth)
+	if wUnauth.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 Unauthorized, got %d", wUnauth.Code)
+	}
+
+	// 2. /health should be whitelisted and return 200
+	reqHealth := httptest.NewRequest(http.MethodGet, "/health", nil)
+	wHealth := httptest.NewRecorder()
+	gw.ServeHTTP(wHealth, reqHealth)
+	if wHealth.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for /health, got %d", wHealth.Code)
+	}
+
+	// 3. /api/v0_1/auth/check without cookie should return 401
+	reqCheckUnauth := httptest.NewRequest(http.MethodGet, "/api/v0_1/auth/check", nil)
+	wCheckUnauth := httptest.NewRecorder()
+	gw.ServeHTTP(wCheckUnauth, reqCheckUnauth)
+	if wCheckUnauth.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 from /auth/check when unauthenticated, got %d", wCheckUnauth.Code)
+	}
+
+	// 4. POST /api/v0_1/auth/login with wrong token -> 401
+	wrongLoginBody := []byte(`{"token":"invalid_token"}`)
+	reqWrongLogin := httptest.NewRequest(http.MethodPost, "/api/v0_1/auth/login", bytes.NewReader(wrongLoginBody))
+	wWrongLogin := httptest.NewRecorder()
+	gw.ServeHTTP(wWrongLogin, reqWrongLogin)
+	if wWrongLogin.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 from login with wrong token, got %d", wWrongLogin.Code)
+	}
+
+	// 5. POST /api/v0_1/auth/login with correct token -> 200 and Set-Cookie
+	correctLoginBody := []byte(`{"token":"` + testToken + `"}`)
+	reqLogin := httptest.NewRequest(http.MethodPost, "/api/v0_1/auth/login", bytes.NewReader(correctLoginBody))
+	wLogin := httptest.NewRecorder()
+	gw.ServeHTTP(wLogin, reqLogin)
+	if wLogin.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK from login, got %d: %s", wLogin.Code, wLogin.Body.String())
+	}
+
+	cookies := wLogin.Result().Cookies()
+	var sessionCookie *http.Cookie
+	for _, c := range cookies {
+		if c.Name == "bspe_session" {
+			sessionCookie = c
+			break
+		}
+	}
+	if sessionCookie == nil || sessionCookie.Value == "" {
+		t.Fatalf("expected bspe_session cookie in login response")
+	}
+
+	// 6. Request /api/v0_1/auth/check WITH session cookie -> 200
+	reqCheckAuthed := httptest.NewRequest(http.MethodGet, "/api/v0_1/auth/check", nil)
+	reqCheckAuthed.AddCookie(sessionCookie)
+	wCheckAuthed := httptest.NewRecorder()
+	gw.ServeHTTP(wCheckAuthed, reqCheckAuthed)
+	if wCheckAuthed.Code != http.StatusOK {
+		t.Fatalf("expected 200 from /auth/check with cookie, got %d", wCheckAuthed.Code)
+	}
+
+	// 7. Request protected route /api/v0_1/assets WITH session cookie -> 200
+	reqAssetsAuthed := httptest.NewRequest(http.MethodGet, "/api/v0_1/assets", nil)
+	reqAssetsAuthed.AddCookie(sessionCookie)
+	wAssetsAuthed := httptest.NewRecorder()
+	gw.ServeHTTP(wAssetsAuthed, reqAssetsAuthed)
+	if wAssetsAuthed.Code != http.StatusOK {
+		t.Fatalf("expected 200 from /api/v0_1/assets with cookie, got %d", wAssetsAuthed.Code)
+	}
+
+	// 8. Request protected route WITH Authorization Header -> 200
+	reqAssetsBearer := httptest.NewRequest(http.MethodGet, "/api/v0_1/assets", nil)
+	reqAssetsBearer.Header.Set("Authorization", "Bearer "+testToken)
+	wAssetsBearer := httptest.NewRecorder()
+	gw.ServeHTTP(wAssetsBearer, reqAssetsBearer)
+	if wAssetsBearer.Code != http.StatusOK {
+		t.Fatalf("expected 200 from /api/v0_1/assets with Bearer token, got %d", wAssetsBearer.Code)
+	}
+
+	// 9. Logout -> clears session cookie
+	reqLogout := httptest.NewRequest(http.MethodPost, "/api/v0_1/auth/logout", nil)
+	reqLogout.AddCookie(sessionCookie)
+	wLogout := httptest.NewRecorder()
+	gw.ServeHTTP(wLogout, reqLogout)
+	if wLogout.Code != http.StatusOK {
+		t.Fatalf("expected 200 from logout, got %d", wLogout.Code)
+	}
+	logoutCookies := wLogout.Result().Cookies()
+	var clearedCookie *http.Cookie
+	for _, c := range logoutCookies {
+		if c.Name == "bspe_session" {
+			clearedCookie = c
+			break
+		}
+	}
+	if clearedCookie == nil || clearedCookie.MaxAge > 0 {
+		t.Fatalf("expected cleared session cookie with negative max age")
+	}
+}
+

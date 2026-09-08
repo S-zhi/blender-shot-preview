@@ -233,7 +233,7 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
 
       // 2. Open Real SSE Stream
       const streamUrl = ShotPreviewService.getTaskStreamUrl(taskRes.task_id);
-      const eventSource = new EventSource(streamUrl);
+      const eventSource = new EventSource(streamUrl, { withCredentials: true });
       activeEventSources.set(assistantMsgId, eventSource);
       let settled = false;
       let inactivityTimer: ReturnType<typeof setTimeout> | undefined;
