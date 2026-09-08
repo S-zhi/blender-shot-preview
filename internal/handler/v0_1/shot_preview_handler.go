@@ -80,7 +80,7 @@ func (h *ShotPreviewHandler) CreateShotPreviewTask(ctx context.Context, request 
 		UserID: userID, KeyID: keyIDFromContext(ctx), Prompt: prompt,
 		ConversationID: strings.TrimSpace(request.GetConversationId()), RequestID: requestID,
 		WorkflowID: strings.TrimSpace(request.GetWorkflowId()), WorkflowVersion: strings.TrimSpace(request.GetWorkflowVersion()),
-		RequireConfirmation: true,
+		RequireConfirmation: false,
 	})
 	if errors.Is(err, service.ErrInvalidTaskRequest) {
 		return &api.CreateShotPreviewTaskResponse{TaskId: result.TaskID, Status: api.TaskStatus_REJECTED, RequestId: &requestID}, nil
@@ -259,4 +259,3 @@ func keyIDFromContext(ctx context.Context) string {
 	v, _ := ctx.Value(LLMKeyIDContextKey).(string)
 	return v
 }
-
