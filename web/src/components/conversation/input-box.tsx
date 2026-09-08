@@ -4,7 +4,6 @@ import clsx from "clsx";
 import { useConversationStore } from "#/stores/conversation-store";
 import { useSettingsStore } from "#/stores/settings-store";
 import { useNavigationStore } from "#/stores/navigation-store";
-import { LLMProvider } from "#/api/types";
 
 interface InputBoxProps {
   initialPrompt?: string;
@@ -18,7 +17,7 @@ export const InputBox: React.FC<InputBoxProps> = ({
   const [content, setContent] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { sendMessage, isGenerating, stopGenerating } = useConversationStore();
-  const { provider, modelName } = useSettingsStore();
+  const { selectedProviderId, modelName } = useSettingsStore();
   const { setActiveView } = useNavigationStore();
 
   useEffect(() => {
@@ -86,7 +85,7 @@ export const InputBox: React.FC<InputBoxProps> = ({
             >
               <Cpu size={13} className="text-brand-primary" />
               <span className="font-mono text-[11px] font-medium">
-                {provider === LLMProvider.OPENAI ? "OpenAI" : "Anthropic"}: {modelName}
+                {selectedProviderId}: {modelName}
               </span>
             </button>
 
