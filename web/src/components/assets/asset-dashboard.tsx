@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   Boxes,
   Camera,
@@ -9,16 +9,19 @@ import {
   HardDrive,
   FileCode,
   Tag,
-  ExternalLink,
   Trash2,
-  CheckCircle2,
   X,
   Loader2,
   FileUp,
+  Eye,
+  Bone,
+  CheckCircle2,
+  ExternalLink,
 } from "lucide-react";
 import clsx from "clsx";
 import { AssetService } from "#/api/asset-service";
 import { AssetView, AssetType, GetAssetStatsResponse } from "#/api/types";
+import { AssetPreviewModal } from "./asset-preview-modal";
 
 export const AssetDashboard: React.FC = () => {
   const [activeType, setActiveType] = useState<string>("all");
@@ -32,6 +35,10 @@ export const AssetDashboard: React.FC = () => {
   });
   const [loading, setLoading] = useState(true);
 
+  // 3D Asset Preview modal state
+  const [previewAsset, setPreviewAsset] = useState<AssetView | null>(null);
+  const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false);
+
   // Drag & Drop Upload modal state
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -41,7 +48,7 @@ export const AssetDashboard: React.FC = () => {
   const [uploadDescription, setUploadDescription] = useState("");
   const [uploadTags, setUploadTags] = useState("");
   const [isUploading, setIsUploading] = useState(false);
-  const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const fetchAssetsAndStats = useCallback(async () => {
     try {
@@ -356,83 +363,135 @@ export const AssetDashboard: React.FC = () => {
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 pb-16">
-            {assets.map((asset) => (
-              <div
-                key={asset.asset_id}
-                className="rounded-2xl bg-[#14171d]/85 border border-[#202532] hover:border-[#333d4e] p-5 flex flex-col justify-between transition-all duration-200 shadow-sm hover:shadow-md group"
-              >
-                <div>
-                  {/* Card Top: Format Badge + Status */}
-                  <div className="flex items-center justify-between mb-3">
-                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md bg-[#1a202c] text-[11px] font-mono font-semibold text-brand-primary border border-brand-primary/20">
-                      {asset.file_format.toUpperCase()} · {getTypeName(asset.asset_type)}
-                    </span>
-                    <div className="flex items-center gap-1.5 text-xs text-[#8490a5]">
-                      <span className="inline-flex items-center gap-1 text-[11px] text-emerald-400">
-                        <CheckCircle2 size={12} />
-                        就绪
+            {assets.map((asset) => {
+              const hasRig = asset.metadata?.has_face_rig || asset.metadata?.rig_type;
+              const is3DModel = asset.asset_type === AssetType.MODEL_3D;
+
+              return (
+                <div
+                  key={asset.asset_id}
+                  className="rounded-2xl bg-[#14171d]/85 border border-[#202532] hover:border-[#333d4e] p-5 flex flex-col justify-between transition-all duration-200 shadow-sm hover:shadow-md group"
+                >
+                  <div>
+                    {/* Card Top: Format Badge + Status */}
+                    <div className="flex items-center justify-between mb-3">
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md bg-[#1a202c] text-[11px] font-mono font-semibold text-brand-primary border border-brand-primary/20">
+                        {asset.file_format.toUpperCase()} · {getTypeName(asset.asset_type)}
                       </span>
+                      <div className="flex items-center gap-1.5 text-xs text-[#8490a5]">
+                        <span className="inline-flex items-center gap-1 text-[11px] text-emerald-400">
+                          <CheckCircle2 size={12} />
+                          就绪
+                        </span>
+                        <button
+                          onClick={() => handleDelete(asset.asset_id)}
+                          title="删除资产 (真实调用 Go 后端)"
+                          className="p-1 text-[#646e80] hover:text-red-400 hover:bg-white/5 rounded transition-colors cursor-pointer"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Asset Title */}
+                    <h3 className="text-sm font-semibold text-white/95 mb-1.5 truncate group-hover:text-white transition-colors">
+                      {asset.name}
+                    </h3>
+
+                    {/* Description */}
+                    <p className="text-xs text-[#788497] leading-relaxed line-clamp-2 mb-3.5">
+                      {asset.description || "暂无描述"}
+                    </p>
+
+                    {/* Blender Inspector Metadata Badges */}
+                    {asset.metadata && (
+                      <div className="p-2 rounded-lg bg-[#0e1117] border border-[#1b212c] mb-3.5 flex items-center justify-between text-[11px] font-mono text-[#8490a5]">
+                        {asset.metadata.poly_count && (
+                          <div>
+                            面数: <span className="text-white/90">{(asset.metadata.poly_count / 1000).toFixed(0)}k</span>
+                          </div>
+                        )}
+                        {hasRig && (
+                          <div className="flex items-center gap-1 text-emerald-400">
+                            <Bone size={12} />
+                            <span>{asset.metadata.rig_type ? "带骨骼绑定" : "基础骨骼"}</span>
+                          </div>
+                        )}
+                        {asset.metadata.duration_frames && (
+                          <div className="text-[#cfb755]">
+                            {asset.metadata.duration_frames}帧
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Tags row */}
+                    {asset.tags && asset.tags.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 mb-4">
+                        {asset.tags.map((tag, idx) => (
+                          <span
+                            key={idx}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-[#0e1014] text-[10px] text-[#8490a5] border border-[#1d222b]"
+                          >
+                            <Tag size={10} className="text-[#5a6372]" />
+                            <span>{tag}</span>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Card Bottom Meta Info & Actions */}
+                  <div className="pt-3 border-t border-[#1d222b] flex items-center justify-between text-xs text-[#646e80]">
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-white/80">
+                        {formatBytes(asset.file_size_bytes)}
+                      </span>
+                      <span>·</span>
+                      <span className="truncate max-w-28">{asset.updated_at}</span>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      {/* 3D Preview Button */}
+                      {is3DModel && (
+                        <button
+                          onClick={() => {
+                            setPreviewAsset(asset);
+                            setIsPreviewModalOpen(true);
+                          }}
+                          className="flex items-center gap-1 text-[11px] px-2 py-1 rounded bg-[#1b2230] text-emerald-400 hover:bg-[#232c3d] border border-emerald-500/20 transition-all cursor-pointer font-medium"
+                          title="在 Three.js 视口中 3D 交互预览"
+                        >
+                          <Eye size={12} />
+                          <span>3D 预览</span>
+                        </button>
+                      )}
+
                       <button
-                        onClick={() => handleDelete(asset.asset_id)}
-                        title="删除资产 (真实调用 Go 后端)"
-                        className="p-1 text-[#646e80] hover:text-red-400 hover:bg-white/5 rounded transition-colors"
+                        onClick={() => alert(`已在当前分镜工程中装载资产: ${asset.name}`)}
+                        className="flex items-center gap-1 text-[11px] text-brand-primary hover:underline cursor-pointer"
                       >
-                        <Trash2 size={13} />
+                        <span>装入分镜</span>
+                        <ExternalLink size={11} />
                       </button>
                     </div>
                   </div>
-
-                  {/* Asset Title */}
-                  <h3 className="text-sm font-semibold text-white/95 mb-1.5 truncate group-hover:text-white transition-colors">
-                    {asset.name}
-                  </h3>
-
-                  {/* Description */}
-                  <p className="text-xs text-[#788497] leading-relaxed line-clamp-2 mb-3.5">
-                    {asset.description || "暂无描述"}
-                  </p>
-
-                  {/* Tags row */}
-                  {asset.tags && asset.tags.length > 0 && (
-                    <div className="flex flex-wrap gap-1.5 mb-4">
-                      {asset.tags.map((tag, idx) => (
-                        <span
-                          key={idx}
-                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-[#0e1014] text-[10px] text-[#8490a5] border border-[#1d222b]"
-                        >
-                          <Tag size={10} className="text-[#5a6372]" />
-                          <span>{tag}</span>
-                        </span>
-                      ))}
-                    </div>
-                  )}
                 </div>
-
-                {/* Card Bottom Meta Info */}
-                <div className="pt-3 border-t border-[#1d222b] flex items-center justify-between text-xs text-[#646e80]">
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono text-white/80">
-                      {formatBytes(asset.file_size_bytes)}
-                    </span>
-                    <span>·</span>
-                    <span className="truncate max-w-28">{asset.updated_at}</span>
-                  </div>
-
-                  <button
-                    onClick={() => alert(`已在当前分镜工程中装载资产: ${asset.name}`)}
-                    className="flex items-center gap-1 text-[11px] text-brand-primary hover:underline"
-                  >
-                    <span>装入分镜</span>
-                    <ExternalLink size={11} />
-                  </button>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
 
-      {/* 5. Drag & Drop Upload/Import Asset Modal */}
+      {/* 5. Asset Fullscreen / Interactive Preview Modal */}
+      <AssetPreviewModal
+        asset={previewAsset}
+        isOpen={isPreviewModalOpen}
+        onClose={() => setIsPreviewModalOpen(false)}
+        onInject={(a) => alert(`已在当前分镜工程中装载资产: ${a.name}`)}
+      />
+
+      {/* 6. Drag & Drop Upload/Import Asset Modal */}
       {isUploadModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-xs p-4 animate-in fade-in duration-150">
           <div className="w-full max-w-lg rounded-2xl bg-[#14171d] border border-[#282f3d] p-6 shadow-2xl space-y-5 text-content">

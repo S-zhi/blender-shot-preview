@@ -8,6 +8,7 @@ import {
   DeleteAssetResponse,
   GetAssetStatsRequest,
   GetAssetStatsResponse,
+  AssetView,
 } from "./types";
 
 export class AssetService {
@@ -84,5 +85,26 @@ export class AssetService {
     }
 
     return (await response.json()) as RegisterAssetResponse;
+  }
+
+  static async uploadAssetFile(file: File, name?: string, userId?: string): Promise<AssetView> {
+    const res = await this.uploadAsset(file, {
+      user_id: userId || "default_user_001",
+      name: name || file.name,
+    });
+
+    // Return an AssetView projection for caller compatibility
+    return {
+      asset_id: res.asset_id,
+      name: name || file.name,
+      asset_type: 1, // MODEL_3D
+      file_format: file.name.split(".").pop() || "blend",
+      file_size_bytes: file.size,
+      storage_uri: `blender://assets/${file.name}`,
+      status: res.status,
+      tags: ["拖拽导入", file.name.split(".").pop() || "blend"],
+      created_at: new Date().toISOString(),
+      updated_at: "刚刚",
+    };
   }
 }

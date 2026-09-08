@@ -416,3 +416,85 @@ func (r *failNthUpdateRepository) updateCount() int {
 	defer r.mu.Unlock()
 	return r.updates
 }
+
+func TestRunner_StepConfirmationAndAdjustment(t *testing.T) {
+	agentInvoker := AgentInvokerFunc(func(_ context.Context, req AgentRequest) (json.RawMessage, error) {
+		return json.RawMessage(`{"original":"spec"}`), nil
+	})
+	stepInvoker := StepInvokerFunc(func(_ context.Context, req StepRequest) (json.RawMessage, error) {
+		if req.NodeID == "FollowUp" {
+			deps := req.Dependencies["AgentStep"]
+			return deps.JSON, nil
+		}
+		return json.RawMessage(`{}`), nil
+	})
+
+	runner := NewRunner(NewMemoryRepository(), agentInvoker, stepInvoker, nil)
+
+	task, created, err := runner.Submit(context.Background(), Submission{
+		IdempotencyKey:      "confirm-key-1",
+		Input:               snapshot(t, map[string]string{"prompt": "hi"}),
+		RequireConfirmation: true,
+		Workflow: Workflow{Nodes: []NodeSpec{
+			{
+				ID:         "AgentStep",
+				Invocation: Invocation{Kind: InvocationAgent, Target: "intent-agent"},
+			},
+			{
+				ID:         "FollowUp",
+				DependsOn:  []NodeID{"AgentStep"},
+				Invocation: Invocation{Kind: InvocationStep, Target: "follow-step"},
+			},
+		}},
+	})
+	if err != nil || !created {
+		t.Fatalf("Submit err=%v, created=%v", err, created)
+	}
+	events, unsub := runner.Subscribe(task.ID)
+	defer unsub()
+
+	// 1. Wait until AgentStep is in NodeStatusWaitingConfirmation
+	waitForTask(t, runner, task.ID, func(tk Task) bool {
+		node, ok := tk.Node("AgentStep")
+		return ok && node.Status == NodeStatusWaitingConfirmation
+	})
+
+	// 2. Adjust output
+	adjustedSnap := snapshot(t, map[string]string{"adjusted": "true"})
+	if err := runner.AdjustNodeOutput(context.Background(), task.ID, "AgentStep", adjustedSnap); err != nil {
+		t.Fatalf("AdjustNodeOutput err: %v", err)
+	}
+
+	// 3. Confirm node
+	if err := runner.ConfirmNode(context.Background(), task.ID, "AgentStep", nil); err != nil {
+		t.Fatalf("ConfirmNode err: %v", err)
+	}
+
+	// 4. Wait for full task success
+	finalTask := waitForTask(t, runner, task.ID, func(tk Task) bool {
+		return tk.Status == TaskStatusSucceeded
+	})
+
+	followUp, _ := finalTask.Node("FollowUp")
+	if followUp.Output == nil || string(followUp.Output.JSON) != `{"adjusted":"true"}` {
+		t.Fatalf("FollowUp node did not receive adjusted output: %#v", followUp.Output)
+	}
+
+	// Check that we received events
+	var gotWaitingConfirm, gotOutputAdjusted, gotSucceeded bool
+	for len(events) > 0 {
+		ev := <-events
+		if ev.Type == EventNodeWaitingConfirm {
+			gotWaitingConfirm = true
+		}
+		if ev.Type == EventNodeOutputAdjusted {
+			gotOutputAdjusted = true
+		}
+		if ev.Type == EventTaskSucceeded {
+			gotSucceeded = true
+		}
+	}
+	if !gotWaitingConfirm || !gotOutputAdjusted || !gotSucceeded {
+		t.Errorf("events: waitingConfirm=%v, adjusted=%v, succeeded=%v", gotWaitingConfirm, gotOutputAdjusted, gotSucceeded)
+	}
+}
