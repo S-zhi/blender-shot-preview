@@ -6,6 +6,8 @@ ASSET_IDL := idl/v0_1/asset_service.thrift
 SHELL := /bin/bash
 NODE_BIN_PATH := $(HOME)/.nvm/versions/node/$(shell [ -d $(HOME)/.nvm/versions/node ] && ls -1 $(HOME)/.nvm/versions/node 2>/dev/null | tail -n 1)/bin
 
+.DEFAULT_GOAL := dev
+
 .PHONY: generate test run server web dev start stop check-env install-web build clean
 
 generate:
