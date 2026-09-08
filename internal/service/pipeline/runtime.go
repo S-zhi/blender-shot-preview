@@ -64,6 +64,9 @@ func buildAgentInput(request AgentRequest) (json.RawMessage, pipelineIdentity, e
 	if err != nil {
 		return nil, pipelineIdentity{}, err
 	}
+	if request.AgentID == AssetCreatorAgentID {
+		return append(json.RawMessage(nil), request.Input.JSON...), identity, nil
+	}
 	switch request.NodeID {
 	case NodeIntent:
 		initial, ok := request.Dependencies[NodeInitialize]
