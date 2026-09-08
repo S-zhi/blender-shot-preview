@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   Boxes,
   Camera,
@@ -13,146 +13,118 @@ import {
   Trash2,
   CheckCircle2,
   X,
+  Loader2,
 } from "lucide-react";
 import clsx from "clsx";
-
-interface Asset {
-  id: string;
-  name: string;
-  type: "model" | "preset" | "material" | "animation";
-  typeName: string;
-  format: string;
-  size: string;
-  tags: string[];
-  updatedAt: string;
-  status: "ready" | "processing";
-  desc: string;
-}
+import { AssetService } from "#/api/asset-service";
+import { AssetView, AssetType, GetAssetStatsResponse } from "#/api/types";
 
 export const AssetDashboard: React.FC = () => {
   const [activeType, setActiveType] = useState<string>("all");
   const [search, setSearch] = useState("");
+  const [assets, setAssets] = useState<AssetView[]>([]);
+  const [stats, setStats] = useState<GetAssetStatsResponse>({
+    total_assets: 0,
+    total_models: 0,
+    total_presets: 0,
+    total_storage_bytes: 0,
+  });
+  const [loading, setLoading] = useState(true);
+
+  // Upload modal state
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [uploadName, setUploadName] = useState("");
-  const [uploadType, setUploadType] = useState("model");
+  const [uploadType, setUploadType] = useState<AssetType>(AssetType.MODEL_3D);
+  const [isUploading, setIsUploading] = useState(false);
 
-  const [assets, setAssets] = useState<Asset[]>([
-    {
-      id: "asset_001",
-      name: "cyberpunk_street_night.blend",
-      type: "model",
-      typeName: "3D 模型",
-      format: "BLEND",
-      size: "348 MB",
-      tags: ["赛博朋克", "雨夜", "SSR光影"],
-      updatedAt: "10分钟前",
-      status: "ready",
-      desc: "包含高细节湿漉路面贴图、霓虹招牌顶点着色与体积雾灯光设置",
-    },
-    {
-      id: "asset_002",
-      name: "dolly_zoom_rack_focus_35to85.json",
-      type: "preset",
-      typeName: "镜头预设",
-      format: "JSON",
-      size: "12 KB",
-      tags: ["推拉变焦", "平移对焦", "180帧"],
-      updatedAt: "1小时前",
-      status: "ready",
-      desc: "Blender 摄像机平滑变焦焦点转移曲线数据，定焦前景水珠到背景人脸",
-    },
-    {
-      id: "asset_003",
-      name: "mechanical_watch_center.blend",
-      type: "model",
-      typeName: "3D 模型",
-      format: "BLEND",
-      size: "142 MB",
-      tags: ["工业产品", "精密零件", "金属材质"],
-      updatedAt: "昨天",
-      status: "ready",
-      desc: "高精度机械机芯齿轮结构模型，带独立中心对焦旋转轴",
-    },
-    {
-      id: "asset_004",
-      name: "orbit_360_smooth_yaw.py",
-      type: "preset",
-      typeName: "镜头预设",
-      format: "PY",
-      size: "8.4 KB",
-      tags: ["圆周环绕", "DampedTrack", "恒速"],
-      updatedAt: "2天前",
-      status: "ready",
-      desc: "Python 脚本驱动的 360 度圆周运镜轨迹生成算法",
-    },
-    {
-      id: "asset_005",
-      name: "tokyo_night_rain_4k.hdr",
-      type: "material",
-      typeName: "材质贴图",
-      format: "HDR",
-      size: "68 MB",
-      tags: ["HDRI", "夜景环境光", "4K"],
-      updatedAt: "3天前",
-      status: "ready",
-      desc: "32-bit 浮点高动态范围环境贴图，提供高真实度反射与环境照明",
-    },
-    {
-      id: "asset_006",
-      name: "fpv_drone_canyon_run.abc",
-      type: "animation",
-      typeName: "动画序列",
-      format: "ABC",
-      size: "215 MB",
-      tags: ["FPV无人机", "大景深", "动态模糊"],
-      updatedAt: "5天前",
-      status: "ready",
-      desc: "Alembic 格式无人机快速俯冲与穿越山谷相机运动缓存序列",
-    },
-  ]);
+  const fetchAssetsAndStats = useCallback(async () => {
+    try {
+      setLoading(true);
+      const [listRes, statsRes] = await Promise.all([
+        AssetService.listAssets({
+          user_id: "default_user_001",
+          query_keyword: search,
+          asset_type: activeType === "all" ? undefined : Number(activeType),
+        }),
+        AssetService.getAssetStats({ user_id: "default_user_001" }),
+      ]);
+      setAssets(listRes.assets || []);
+      setStats(statsRes);
+    } catch (err) {
+      console.error("Failed to load assets from backend:", err);
+    } finally {
+      setLoading(false);
+    }
+  }, [activeType, search]);
 
-  const filteredAssets = assets.filter((item) => {
-    const matchesType = activeType === "all" || item.type === activeType;
-    const matchesSearch =
-      item.name.toLowerCase().includes(search.toLowerCase()) ||
-      item.tags.some((t) => t.toLowerCase().includes(search.toLowerCase()));
-    return matchesType && matchesSearch;
-  });
+  useEffect(() => {
+    fetchAssetsAndStats();
+  }, [fetchAssetsAndStats]);
 
-  const handleDelete = (id: string) => {
-    setAssets((prev) => prev.filter((a) => a.id !== id));
+  const handleDelete = async (id: string) => {
+    try {
+      await AssetService.deleteAsset({
+        user_id: "default_user_001",
+        asset_id: id,
+      });
+      fetchAssetsAndStats();
+    } catch (err) {
+      alert("删除失败: " + (err as Error).message);
+    }
   };
 
-  const handleUploadSubmit = (e: React.FormEvent) => {
+  const handleUploadSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!uploadName.trim()) return;
-    const newAsset: Asset = {
-      id: `asset_${Date.now()}`,
-      name: uploadName.endsWith(".blend") ? uploadName : `${uploadName}.blend`,
-      type: uploadType as Asset["type"],
-      typeName:
-        uploadType === "model"
-          ? "3D 模型"
-          : uploadType === "preset"
-          ? "镜头预设"
-          : uploadType === "material"
-          ? "材质贴图"
-          : "动画序列",
-      format: uploadType === "model" ? "BLEND" : uploadType === "preset" ? "JSON" : "PNG",
-      size: "54 MB",
-      tags: ["新导入", "分镜素材"],
-      updatedAt: "刚刚",
-      status: "ready",
-      desc: "由前端看板注册的新建分镜工程资产",
-    };
-    setAssets([newAsset, ...assets]);
-    setIsUploadModalOpen(false);
-    setUploadName("");
+    try {
+      setIsUploading(true);
+      await AssetService.registerAsset({
+        user_id: "default_user_001",
+        name: uploadName,
+        asset_type: uploadType,
+        file_format: uploadType === AssetType.MODEL_3D ? "blend" : "json",
+        file_size_bytes: 54 * 1024 * 1024,
+        storage_uri: `blender://assets/${uploadName}`,
+        description: "由前端看板真实注册的分镜工程资产",
+        tags: ["新建分镜素材", "实机存储"],
+      });
+      setIsUploadModalOpen(false);
+      setUploadName("");
+      fetchAssetsAndStats();
+    } catch (err) {
+      alert("上传失败: " + (err as Error).message);
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const formatBytes = (bytes: number) => {
+    if (!bytes || bytes === 0) return "0 MB";
+    const mb = bytes / (1024 * 1024);
+    if (mb > 1024) {
+      return `${(mb / 1024).toFixed(2)} GB`;
+    }
+    return `${mb.toFixed(0)} MB`;
+  };
+
+  const getTypeName = (type: AssetType) => {
+    switch (type) {
+      case AssetType.MODEL_3D:
+        return "3D 模型";
+      case AssetType.SHOT_PRESET:
+        return "镜头预设";
+      case AssetType.MATERIAL:
+        return "材质贴图";
+      case AssetType.ANIMATION:
+        return "动画序列";
+      default:
+        return "未分类";
+    }
   };
 
   return (
     <div className="flex-1 h-full overflow-y-auto bg-[#090b0e] text-content p-6 lg:p-10 font-sans select-none relative">
-      {/* Subtle Ambient Radial Lighting */}
+      {/* Ambient Radial Glow */}
       <div className="absolute top-0 right-1/3 w-[600px] h-[280px] bg-brand-primary/5 blur-[120px] pointer-events-none -z-0" />
 
       <div className="max-w-6xl mx-auto space-y-7 z-10 relative">
@@ -164,12 +136,13 @@ export const AssetDashboard: React.FC = () => {
             </div>
             <h1 className="text-2xl lg:text-[28px] font-bold tracking-tight text-white/95 mb-1.5 flex items-center gap-2.5">
               <span>资产管理看板</span>
-              <span className="text-xs font-mono font-normal px-2 py-0.5 rounded-full bg-[#1c212c] text-[#8490a5] border border-[#28303f]">
-                AssetService RPC v0.1
+              <span className="text-xs font-mono font-normal px-2.5 py-0.5 rounded-full bg-[#1c212c] text-emerald-400 border border-emerald-500/20 flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                Go RPC 实机联通
               </span>
             </h1>
             <p className="text-xs text-[#717b8c]">
-              管理分镜三维模型、相机轨迹预设、HDRI 环境贴图与动画序列缓存。
+              直接对接后端 Kitex AssetService 内存池，提供场景模型、相机预设与贴图真实存取。
             </p>
           </div>
 
@@ -184,7 +157,7 @@ export const AssetDashboard: React.FC = () => {
           </div>
         </div>
 
-        {/* 2. 4 Metric KPI Cards for Assets */}
+        {/* 2. 4 Metric KPI Cards connected to real Go Backend */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {/* Card 1: Total Assets */}
           <div className="rounded-xl bg-[#14171d]/80 hover:bg-[#181d26] border border-[#202532] hover:border-[#333c4e] p-4.5 flex flex-col justify-between transition-all duration-200 shadow-xs">
@@ -194,10 +167,10 @@ export const AssetDashboard: React.FC = () => {
             </div>
             <div className="mt-4">
               <div className="text-3xl font-bold tracking-tight text-white/95">
-                {assets.length}
+                {stats.total_assets}
               </div>
               <div className="text-[11px] text-[#717b8c] mt-1 font-mono">
-                {assets.filter((a) => a.status === "ready").length} 处于可用就绪态
+                实时从 Go 后端聚合统计
               </div>
             </div>
           </div>
@@ -210,7 +183,7 @@ export const AssetDashboard: React.FC = () => {
             </div>
             <div className="mt-4">
               <div className="text-3xl font-bold tracking-tight text-white/95">
-                {assets.filter((a) => a.type === "model").length}
+                {stats.total_models}
               </div>
               <div className="text-[11px] text-[#717b8c] mt-1 font-mono">.blend / .fbx 格式</div>
             </div>
@@ -224,7 +197,7 @@ export const AssetDashboard: React.FC = () => {
             </div>
             <div className="mt-4">
               <div className="text-3xl font-bold tracking-tight text-[#cfb755]">
-                {assets.filter((a) => a.type === "preset").length}
+                {stats.total_presets}
               </div>
               <div className="text-[11px] text-[#717b8c] mt-1 font-mono">
                 支持一键注入 Blender 相机
@@ -239,8 +212,10 @@ export const AssetDashboard: React.FC = () => {
               <HardDrive size={15} className="text-[#646e80]" />
             </div>
             <div className="mt-4">
-              <div className="text-3xl font-bold tracking-tight text-white/95">841 MB</div>
-              <div className="text-[11px] text-[#717b8c] mt-1 font-mono">本地 RPC 缓存驱动</div>
+              <div className="text-3xl font-bold tracking-tight text-white/95">
+                {formatBytes(stats.total_storage_bytes)}
+              </div>
+              <div className="text-[11px] text-[#717b8c] mt-1 font-mono">真实后端字节统计</div>
             </div>
           </div>
         </div>
@@ -251,10 +226,10 @@ export const AssetDashboard: React.FC = () => {
           <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
             {[
               { key: "all", label: "全部", icon: Boxes },
-              { key: "model", label: "3D 模型", icon: Layers },
-              { key: "preset", label: "镜头预设", icon: Camera },
-              { key: "material", label: "材质贴图", icon: FileCode },
-              { key: "animation", label: "动画序列", icon: Film },
+              { key: String(AssetType.MODEL_3D), label: "3D 模型", icon: Layers },
+              { key: String(AssetType.SHOT_PRESET), label: "镜头预设", icon: Camera },
+              { key: String(AssetType.MATERIAL), label: "材质贴图", icon: FileCode },
+              { key: String(AssetType.ANIMATION), label: "动画序列", icon: Film },
             ].map((tab) => {
               const Icon = tab.icon;
               const isSelected = activeType === tab.key;
@@ -283,83 +258,98 @@ export const AssetDashboard: React.FC = () => {
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="搜索资产名称或标签..."
+              placeholder="实时搜索后端资产..."
               className="w-full h-8 pl-9 pr-3 rounded-lg bg-[#14171d] border border-[#202532] text-xs text-white placeholder-[#5a6372] focus:outline-none focus:border-[#384254]"
             />
           </div>
         </div>
 
         {/* 4. Asset Cards Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 pb-16">
-          {filteredAssets.map((asset) => (
-            <div
-              key={asset.id}
-              className="rounded-2xl bg-[#14171d]/85 border border-[#202532] hover:border-[#333d4e] p-5 flex flex-col justify-between transition-all duration-200 shadow-sm hover:shadow-md group"
-            >
-              <div>
-                {/* Card Top: Format Badge + Status */}
-                <div className="flex items-center justify-between mb-3">
-                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md bg-[#1a202c] text-[11px] font-mono font-semibold text-brand-primary border border-brand-primary/20">
-                    {asset.format} · {asset.typeName}
-                  </span>
-                  <div className="flex items-center gap-1.5 text-xs text-[#8490a5]">
-                    <span className="inline-flex items-center gap-1 text-[11px] text-emerald-400">
-                      <CheckCircle2 size={12} />
-                      就绪
+        {loading ? (
+          <div className="py-20 flex flex-col items-center justify-center gap-2 text-xs text-[#8490a5]">
+            <Loader2 size={24} className="animate-spin text-brand-primary" />
+            <span>正在通过 Kitex HTTP Gateway 请求后端资产数据...</span>
+          </div>
+        ) : assets.length === 0 ? (
+          <div className="py-20 text-center text-xs text-[#717b8c]">
+            暂无匹配的后端分镜资产
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 pb-16">
+            {assets.map((asset) => (
+              <div
+                key={asset.asset_id}
+                className="rounded-2xl bg-[#14171d]/85 border border-[#202532] hover:border-[#333d4e] p-5 flex flex-col justify-between transition-all duration-200 shadow-sm hover:shadow-md group"
+              >
+                <div>
+                  {/* Card Top: Format Badge + Status */}
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md bg-[#1a202c] text-[11px] font-mono font-semibold text-brand-primary border border-brand-primary/20">
+                      {asset.file_format.toUpperCase()} · {getTypeName(asset.asset_type)}
                     </span>
-                    <button
-                      onClick={() => handleDelete(asset.id)}
-                      title="删除资产"
-                      className="p-1 text-[#646e80] hover:text-red-400 hover:bg-white/5 rounded transition-colors"
-                    >
-                      <Trash2 size={13} />
-                    </button>
+                    <div className="flex items-center gap-1.5 text-xs text-[#8490a5]">
+                      <span className="inline-flex items-center gap-1 text-[11px] text-emerald-400">
+                        <CheckCircle2 size={12} />
+                        就绪
+                      </span>
+                      <button
+                        onClick={() => handleDelete(asset.asset_id)}
+                        title="删除资产 (真实调用 Go 后端)"
+                        className="p-1 text-[#646e80] hover:text-red-400 hover:bg-white/5 rounded transition-colors"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
                   </div>
+
+                  {/* Asset Title */}
+                  <h3 className="text-sm font-semibold text-white/95 mb-1.5 truncate group-hover:text-white transition-colors">
+                    {asset.name}
+                  </h3>
+
+                  {/* Description */}
+                  <p className="text-xs text-[#788497] leading-relaxed line-clamp-2 mb-3.5">
+                    {asset.description || "暂无描述"}
+                  </p>
+
+                  {/* Tags row */}
+                  {asset.tags && asset.tags.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 mb-4">
+                      {asset.tags.map((tag, idx) => (
+                        <span
+                          key={idx}
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-[#0e1014] text-[10px] text-[#8490a5] border border-[#1d222b]"
+                        >
+                          <Tag size={10} className="text-[#5a6372]" />
+                          <span>{tag}</span>
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
-                {/* Asset Title */}
-                <h3 className="text-sm font-semibold text-white/95 mb-1.5 truncate group-hover:text-white transition-colors">
-                  {asset.name}
-                </h3>
-
-                {/* Description */}
-                <p className="text-xs text-[#788497] leading-relaxed line-clamp-2 mb-3.5">
-                  {asset.desc}
-                </p>
-
-                {/* Tags row */}
-                <div className="flex flex-wrap gap-1.5 mb-4">
-                  {asset.tags.map((tag, idx) => (
-                    <span
-                      key={idx}
-                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-[#0e1014] text-[10px] text-[#8490a5] border border-[#1d222b]"
-                    >
-                      <Tag size={10} className="text-[#5a6372]" />
-                      <span>{tag}</span>
+                {/* Card Bottom Meta Info */}
+                <div className="pt-3 border-t border-[#1d222b] flex items-center justify-between text-xs text-[#646e80]">
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-white/80">
+                      {formatBytes(asset.file_size_bytes)}
                     </span>
-                  ))}
+                    <span>·</span>
+                    <span className="truncate max-w-28">{asset.updated_at}</span>
+                  </div>
+
+                  <button
+                    onClick={() => alert(`已在当前分镜工程中装载资产: ${asset.name}`)}
+                    className="flex items-center gap-1 text-[11px] text-brand-primary hover:underline"
+                  >
+                    <span>装入分镜</span>
+                    <ExternalLink size={11} />
+                  </button>
                 </div>
               </div>
-
-              {/* Card Bottom Meta Info */}
-              <div className="pt-3 border-t border-[#1d222b] flex items-center justify-between text-xs text-[#646e80]">
-                <div className="flex items-center gap-2">
-                  <span className="font-mono text-white/80">{asset.size}</span>
-                  <span>·</span>
-                  <span>{asset.updatedAt}</span>
-                </div>
-
-                <button
-                  onClick={() => alert(`已在当前分镜工程中装载资产: ${asset.name}`)}
-                  className="flex items-center gap-1 text-[11px] text-brand-primary hover:underline"
-                >
-                  <span>装入分镜</span>
-                  <ExternalLink size={11} />
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* 5. Upload/Import Asset Modal */}
@@ -393,18 +383,18 @@ export const AssetDashboard: React.FC = () => {
                 <label className="block text-[#8490a5] mb-1 font-medium">资产类别 (AssetType)</label>
                 <select
                   value={uploadType}
-                  onChange={(e) => setUploadType(e.target.value)}
+                  onChange={(e) => setUploadType(Number(e.target.value) as AssetType)}
                   className="w-full h-8 px-3 rounded-lg bg-[#0e1014] border border-[#212733] text-white focus:outline-none focus:border-brand-primary"
                 >
-                  <option value="model">3D 模型 (.blend, .fbx, .obj)</option>
-                  <option value="preset">镜头预设 (.json, .py)</option>
-                  <option value="material">材质与贴图 (.png, .exr, .hdr)</option>
-                  <option value="animation">动画序列 (.abc, .bvh)</option>
+                  <option value={AssetType.MODEL_3D}>3D 模型 (.blend, .fbx, .obj)</option>
+                  <option value={AssetType.SHOT_PRESET}>镜头预设 (.json, .py)</option>
+                  <option value={AssetType.MATERIAL}>材质与贴图 (.png, .exr, .hdr)</option>
+                  <option value={AssetType.ANIMATION}>动画序列 (.abc, .bvh)</option>
                 </select>
               </div>
 
-              <div className="p-3 rounded-lg bg-[#0e1014] border border-[#212733] text-[#717b8c] text-[11px] leading-relaxed">
-                提示：本地选中的三维文件将通过 Kitex RPC 接口同步注册至后端 Blender Asset Pipeline。
+              <div className="p-3 rounded-lg bg-[#0e1014] border border-[#212733] text-emerald-400/90 text-[11px] leading-relaxed font-mono">
+                提示：提交后将直接发起 POST /api/v0_1/assets 请求，数据持久化到 Go 后端内存池中。
               </div>
 
               <div className="flex items-center justify-end gap-2 pt-2">
@@ -417,9 +407,11 @@ export const AssetDashboard: React.FC = () => {
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-1.5 rounded-lg bg-white text-black font-semibold hover:bg-gray-200"
+                  disabled={isUploading}
+                  className="px-4 py-1.5 rounded-lg bg-white text-black font-semibold hover:bg-gray-200 flex items-center gap-1.5"
                 >
-                  确认导入
+                  {isUploading && <Loader2 size={13} className="animate-spin" />}
+                  <span>确认导入</span>
                 </button>
               </div>
             </form>

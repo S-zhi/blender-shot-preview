@@ -3,7 +3,7 @@
  * Configurable to use real endpoints or mock adapter
  */
 
-export const USE_MOCK_API = true; // Easily toggleable or via import.meta.env.VITE_USE_MOCK
+export const USE_MOCK_API = false; // Connected to real Go Kitex/HTTP backend
 
 export class ApiClientError extends Error {
   constructor(
