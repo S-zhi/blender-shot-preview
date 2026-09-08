@@ -27,30 +27,7 @@ func TestHTTPGateway_Routes(t *testing.T) {
 		t.Errorf("expected 200 from /health, got %d", wHealth.Code)
 	}
 
-	// 2. Test GET /api/v0_1/assets
-	reqList := httptest.NewRequest(http.MethodGet, "/api/v0_1/assets?user_id=default_user_001", nil)
-	wList := httptest.NewRecorder()
-	gw.ServeHTTP(wList, reqList)
-	if wList.Code != http.StatusOK {
-		t.Errorf("expected 200 from /api/v0_1/assets, got %d: %s", wList.Code, wList.Body.String())
-	}
-	var listRes api.ListAssetsResponse
-	if err := json.Unmarshal(wList.Body.Bytes(), &listRes); err != nil {
-		t.Fatalf("failed to parse list response: %v", err)
-	}
-	if len(listRes.Assets) == 0 {
-		t.Errorf("expected seeded assets from gateway list")
-	}
-
-	// 3. Test GET /api/v0_1/assets/stats
-	reqStats := httptest.NewRequest(http.MethodGet, "/api/v0_1/assets/stats?user_id=default_user_001", nil)
-	wStats := httptest.NewRecorder()
-	gw.ServeHTTP(wStats, reqStats)
-	if wStats.Code != http.StatusOK {
-		t.Errorf("expected 200 from /api/v0_1/assets/stats, got %d", wStats.Code)
-	}
-
-	// 4. Test POST /api/v0_1/assets
+	// 2. Test POST /api/v0_1/assets (Register asset first)
 	newAsset := api.RegisterAssetRequest{
 		UserId:        "default_user_001",
 		Name:          "http_test_model.blend",
@@ -65,6 +42,29 @@ func TestHTTPGateway_Routes(t *testing.T) {
 	gw.ServeHTTP(wPost, reqPost)
 	if wPost.Code != http.StatusOK {
 		t.Errorf("expected 200 from POST /api/v0_1/assets, got %d: %s", wPost.Code, wPost.Body.String())
+	}
+
+	// 3. Test GET /api/v0_1/assets (Verify registered asset is returned)
+	reqList := httptest.NewRequest(http.MethodGet, "/api/v0_1/assets?user_id=default_user_001", nil)
+	wList := httptest.NewRecorder()
+	gw.ServeHTTP(wList, reqList)
+	if wList.Code != http.StatusOK {
+		t.Errorf("expected 200 from /api/v0_1/assets, got %d: %s", wList.Code, wList.Body.String())
+	}
+	var listRes api.ListAssetsResponse
+	if err := json.Unmarshal(wList.Body.Bytes(), &listRes); err != nil {
+		t.Fatalf("failed to parse list response: %v", err)
+	}
+	if len(listRes.Assets) != 1 || listRes.Assets[0].Name != "http_test_model.blend" {
+		t.Errorf("expected 1 registered asset from gateway list, got %d", len(listRes.Assets))
+	}
+
+	// 4. Test GET /api/v0_1/assets/stats
+	reqStats := httptest.NewRequest(http.MethodGet, "/api/v0_1/assets/stats?user_id=default_user_001", nil)
+	wStats := httptest.NewRecorder()
+	gw.ServeHTTP(wStats, reqStats)
+	if wStats.Code != http.StatusOK {
+		t.Errorf("expected 200 from /api/v0_1/assets/stats, got %d", wStats.Code)
 	}
 }
 

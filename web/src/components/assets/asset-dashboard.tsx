@@ -142,7 +142,7 @@ export const AssetDashboard: React.FC = () => {
               </span>
             </h1>
             <p className="text-xs text-[#717b8c]">
-              直接对接后端 Kitex AssetService 内存池，提供场景模型、相机预设与贴图真实存取。
+              直接对接后端 Kitex AssetService 磁盘持久化存储，提供场景模型、相机预设与贴图真实存取。
             </p>
           </div>
 

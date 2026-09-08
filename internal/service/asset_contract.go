@@ -9,19 +9,19 @@ import (
 
 // AssetRecord represents an internal storage model for assets
 type AssetRecord struct {
-	AssetID       string
-	UserID        string
-	Name          string
-	AssetType     v0_1.AssetType
-	FileFormat    string
-	FileSizeBytes int64
-	StorageURI    string
-	ThumbnailURI  string
-	Status        v0_1.AssetStatus
-	Tags          []string
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
-	Description   string
+	AssetID       string           `json:"asset_id"`
+	UserID        string           `json:"user_id"`
+	Name          string           `json:"name"`
+	AssetType     v0_1.AssetType   `json:"asset_type"`
+	FileFormat    string           `json:"file_format"`
+	FileSizeBytes int64            `json:"file_size_bytes"`
+	StorageURI    string           `json:"storage_uri"`
+	ThumbnailURI  string           `json:"thumbnail_uri,omitempty"`
+	Status        v0_1.AssetStatus `json:"status"`
+	Tags          []string         `json:"tags,omitempty"`
+	CreatedAt     time.Time        `json:"created_at"`
+	UpdatedAt     time.Time        `json:"updated_at"`
+	Description   string           `json:"description,omitempty"`
 }
 
 // AssetStore defines the persistence interface for asset metadata

@@ -17,101 +17,9 @@ type InMemoryAssetStore struct {
 }
 
 func NewInMemoryAssetStore() *InMemoryAssetStore {
-	store := &InMemoryAssetStore{
+	return &InMemoryAssetStore{
 		assets: make(map[string]AssetRecord),
 	}
-	now := time.Now()
-	defaults := []AssetRecord{
-		{
-			AssetID:       "asset_default_001",
-			UserID:        "default_user_001",
-			Name:          "cyberpunk_street_night.blend",
-			AssetType:     v0_1.AssetType_MODEL_3D,
-			FileFormat:    "blend",
-			FileSizeBytes: 348 * 1024 * 1024,
-			StorageURI:    "blender://assets/models/cyberpunk_street_night.blend",
-			ThumbnailURI:  "blender://thumbnails/cyberpunk_street_night.png",
-			Status:        v0_1.AssetStatus_AVAILABLE,
-			Tags:          []string{"赛博朋克", "雨夜", "SSR光影"},
-			CreatedAt:     now.Add(-2 * time.Hour),
-			UpdatedAt:     now.Add(-10 * time.Minute),
-			Description:   "包含高细节湿漉路面贴图、霓虹招牌顶点着色与体积雾灯光设置",
-		},
-		{
-			AssetID:       "asset_default_002",
-			UserID:        "default_user_001",
-			Name:          "dolly_zoom_rack_focus_35to85.json",
-			AssetType:     v0_1.AssetType_SHOT_PRESET,
-			FileFormat:    "json",
-			FileSizeBytes: 12 * 1024,
-			StorageURI:    "blender://assets/presets/dolly_zoom_rack_focus_35to85.json",
-			Status:        v0_1.AssetStatus_AVAILABLE,
-			Tags:          []string{"推拉变焦", "平移对焦", "180帧"},
-			CreatedAt:     now.Add(-5 * time.Hour),
-			UpdatedAt:     now.Add(-1 * time.Hour),
-			Description:   "Blender 摄像机平滑变焦焦点转移曲线数据，定焦前景水珠到背景人脸",
-		},
-		{
-			AssetID:       "asset_default_003",
-			UserID:        "default_user_001",
-			Name:          "mechanical_watch_center.blend",
-			AssetType:     v0_1.AssetType_MODEL_3D,
-			FileFormat:    "blend",
-			FileSizeBytes: 142 * 1024 * 1024,
-			StorageURI:    "blender://assets/models/mechanical_watch_center.blend",
-			Status:        v0_1.AssetStatus_AVAILABLE,
-			Tags:          []string{"工业产品", "精密零件", "金属材质"},
-			CreatedAt:     now.Add(-24 * time.Hour),
-			UpdatedAt:     now.Add(-12 * time.Hour),
-			Description:   "高精度机械机芯齿轮结构模型，带独立中心对焦旋转轴",
-		},
-		{
-			AssetID:       "asset_default_004",
-			UserID:        "default_user_001",
-			Name:          "orbit_360_smooth_yaw.py",
-			AssetType:     v0_1.AssetType_SHOT_PRESET,
-			FileFormat:    "py",
-			FileSizeBytes: 8 * 1024,
-			StorageURI:    "blender://assets/presets/orbit_360_smooth_yaw.py",
-			Status:        v0_1.AssetStatus_AVAILABLE,
-			Tags:          []string{"圆周环绕", "DampedTrack", "恒速"},
-			CreatedAt:     now.Add(-48 * time.Hour),
-			UpdatedAt:     now.Add(-24 * time.Hour),
-			Description:   "Python 脚本驱动的 360 度圆周运镜轨迹生成算法",
-		},
-		{
-			AssetID:       "asset_default_005",
-			UserID:        "default_user_001",
-			Name:          "tokyo_night_rain_4k.hdr",
-			AssetType:     v0_1.AssetType_MATERIAL,
-			FileFormat:    "hdr",
-			FileSizeBytes: 68 * 1024 * 1024,
-			StorageURI:    "blender://assets/materials/tokyo_night_rain_4k.hdr",
-			Status:        v0_1.AssetStatus_AVAILABLE,
-			Tags:          []string{"HDRI", "夜景环境光", "4K"},
-			CreatedAt:     now.Add(-72 * time.Hour),
-			UpdatedAt:     now.Add(-36 * time.Hour),
-			Description:   "32-bit 浮点高动态范围环境贴图，提供高真实度反射与环境照明",
-		},
-		{
-			AssetID:       "asset_default_006",
-			UserID:        "default_user_001",
-			Name:          "fpv_drone_canyon_run.abc",
-			AssetType:     v0_1.AssetType_ANIMATION,
-			FileFormat:    "abc",
-			FileSizeBytes: 215 * 1024 * 1024,
-			StorageURI:    "blender://assets/animations/fpv_drone_canyon_run.abc",
-			Status:        v0_1.AssetStatus_AVAILABLE,
-			Tags:          []string{"FPV无人机", "大景深", "动态模糊"},
-			CreatedAt:     now.Add(-96 * time.Hour),
-			UpdatedAt:     now.Add(-48 * time.Hour),
-			Description:   "Alembic 格式无人机快速俯冲与穿越山谷相机运动缓存序列",
-		},
-	}
-	for _, a := range defaults {
-		store.assets[a.AssetID] = a
-	}
-	return store
 }
 
 func (s *InMemoryAssetStore) List(_ context.Context, userID string, assetType *v0_1.AssetType, keyword string, pageNum, pageSize int) ([]AssetRecord, int64, error) {
@@ -122,7 +30,7 @@ func (s *InMemoryAssetStore) List(_ context.Context, userID string, assetType *v
 	kw := strings.ToLower(strings.TrimSpace(keyword))
 
 	for _, a := range s.assets {
-		if userID != "" && a.UserID != userID && a.UserID != "default_user_001" {
+		if userID != "" && a.UserID != userID {
 			continue
 		}
 		if assetType != nil && a.AssetType != *assetType {
@@ -172,7 +80,7 @@ func (s *InMemoryAssetStore) Get(_ context.Context, userID, assetID string) (Ass
 	if !ok {
 		return AssetRecord{}, false, nil
 	}
-	if userID != "" && record.UserID != userID && record.UserID != "default_user_001" {
+	if userID != "" && record.UserID != userID {
 		return AssetRecord{}, false, nil
 	}
 	return record, true, nil
@@ -192,7 +100,7 @@ func (s *InMemoryAssetStore) Delete(_ context.Context, userID, assetID string) (
 	if !ok {
 		return false, nil
 	}
-	if userID != "" && record.UserID != userID && record.UserID != "default_user_001" {
+	if userID != "" && record.UserID != userID {
 		return false, nil
 	}
 	delete(s.assets, assetID)
@@ -204,7 +112,7 @@ func (s *InMemoryAssetStore) GetStats(_ context.Context, userID string) (total, 
 	defer s.mu.RUnlock()
 
 	for _, a := range s.assets {
-		if userID != "" && a.UserID != userID && a.UserID != "default_user_001" {
+		if userID != "" && a.UserID != userID {
 			continue
 		}
 		total++
