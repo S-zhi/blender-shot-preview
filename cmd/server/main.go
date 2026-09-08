@@ -111,7 +111,7 @@ func main() {
 	}
 
 	// 1. Initialize shared services & handlers
-	runner := buildPipelineRunner()
+	runner := buildPipelineRunner(keyManager)
 	shotPreviewSvc := service.NewShotPreviewService(runner)
 	llmKeySvc := service.NewLLMKeyService(keyManager)
 	assetSvc := service.NewAssetService(nil)
@@ -148,7 +148,11 @@ func main() {
 }
 
 func newServer(manager llm_gateway.KeyManager, opts ...server.Option) (server.Server, error) {
-	runner := buildPipelineRunner()
+	var keyUser llm_gateway.KeyUser
+	if ku, ok := manager.(llm_gateway.KeyUser); ok {
+		keyUser = ku
+	}
+	runner := buildPipelineRunner(keyUser)
 	shotPreviewSvc := service.NewShotPreviewService(runner)
 	shotHandler := handlerv0_1.NewShotPreviewHandler(shotPreviewSvc)
 	keyHandler := handlerv0_1.NewLLMKeyHandler(service.NewLLMKeyService(manager))
@@ -172,7 +176,7 @@ func newServerWithHandlers(
 	return svr, nil
 }
 
-func buildPipelineRunner() *pipeline.Runner {
+func buildPipelineRunner(keyUser llm_gateway.KeyUser) *pipeline.Runner {
 	workspaceDir := os.Getenv("BLENDER_WORKSPACE")
 	if workspaceDir == "" {
 		workspaceDir = filepath.Join(os.TempDir(), "blender-shot-preview")
@@ -234,7 +238,7 @@ func buildPipelineRunner() *pipeline.Runner {
 		return nil
 	}
 
-	return pipeline.NewShotPreviewRunner(repo, agentSvc, skillRegistry)
+	return pipeline.NewShotPreviewRunnerWithKeys(repo, agentSvc, skillRegistry, keyUser)
 }
 
 type devChatModel struct{}

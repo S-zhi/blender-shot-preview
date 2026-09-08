@@ -129,6 +129,41 @@ func TestAgentServiceBlocksRequestScopedSkills(t *testing.T) {
 	}
 }
 
+func TestAgentServiceRequestScopedModelBinding(t *testing.T) {
+	t.Parallel()
+
+	defaultModel := &fixedModel{response: "default response"}
+	customModel := &fixedModel{response: "custom model response"}
+
+	service, definitions, _ := newTestAgentService(t, defaultModel)
+	createEnabledDefinition(t, definitions)
+
+	// 1. Without request.Model, should use defaultModel
+	resDefault, err := service.Run(context.Background(), AgentRequest{
+		AgentID: "order-support",
+		Input:   "hello default",
+	})
+	if err != nil {
+		t.Fatalf("run with default model failed: %v", err)
+	}
+	if resDefault.Output != "default response" {
+		t.Fatalf("expected output %q, got %q", "default response", resDefault.Output)
+	}
+
+	// 2. With request.Model, should use customModel
+	resCustom, err := service.Run(context.Background(), AgentRequest{
+		AgentID: "order-support",
+		Input:   "hello custom",
+		Model:   customModel,
+	})
+	if err != nil {
+		t.Fatalf("run with custom model failed: %v", err)
+	}
+	if resCustom.Output != "custom model response" {
+		t.Fatalf("expected output %q, got %q", "custom model response", resCustom.Output)
+	}
+}
+
 func TestAgentServiceValidatesConfiguredInputAndOutputSchemas(t *testing.T) {
 	t.Parallel()
 

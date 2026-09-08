@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
 )
 
@@ -52,7 +53,7 @@ func (s *Service) Run(ctx context.Context, request AgentRequest) (*AgentResult, 
 	if err != nil {
 		return nil, err
 	}
-	return s.execute(ctx, run, definition, false, nil)
+	return s.execute(ctx, run, definition, request.Model, false, nil)
 }
 
 func (s *Service) Stream(ctx context.Context, request AgentRequest) (<-chan AgentEvent, error) {
@@ -63,7 +64,7 @@ func (s *Service) Stream(ctx context.Context, request AgentRequest) (<-chan Agen
 	events := make(chan AgentEvent, 32)
 	go func() {
 		defer close(events)
-		_, _ = s.execute(ctx, run, definition, true, events)
+		_, _ = s.execute(ctx, run, definition, request.Model, true, events)
 	}()
 	return events, nil
 }
@@ -132,7 +133,7 @@ func (s *Service) prepare(ctx context.Context, request AgentRequest) (AgentRun, 
 	return run, definition, nil
 }
 
-func (s *Service) execute(parent context.Context, run AgentRun, definition AgentDefinition, streaming bool, out chan<- AgentEvent) (*AgentResult, error) {
+func (s *Service) execute(parent context.Context, run AgentRun, definition AgentDefinition, chatModel model.BaseChatModel, streaming bool, out chan<- AgentEvent) (*AgentResult, error) {
 	ctx, cancel := context.WithTimeout(withRunID(parent, run.ID), definition.Timeout)
 	s.registerCancel(run.ID, cancel)
 	defer func() {
@@ -157,7 +158,7 @@ func (s *Service) execute(parent context.Context, run AgentRun, definition Agent
 	}
 	publish(AgentEvent{Type: EventAgentStarted})
 
-	runtime, err := s.factory.Build(ctx, definition, streaming)
+	runtime, err := s.factory.BuildWithModel(ctx, definition, chatModel, streaming)
 	if err == nil {
 		err = s.consume(ctx, runtime, run.Input, publish, &run)
 	}

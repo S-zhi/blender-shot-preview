@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/S-zhi/blender-shot-preview/internal/agent"
+	llmgateway "github.com/S-zhi/blender-shot-preview/internal/agent/llm_gateway"
 	"github.com/S-zhi/blender-shot-preview/internal/productiontools"
 	"github.com/cloudwego/eino/components/tool"
 )
@@ -18,12 +19,18 @@ import (
 // and owns the domain-specific input projection between workflow snapshots.
 type AgentServiceInvoker struct {
 	Service agent.AgentService
+	Keys    llmgateway.KeyUser
 }
 
 // NewShotPreviewRunner assembles the stable shot-preview runtime boundary.
 // Callers retain ownership of persistence, agent bootstrap, and tool setup.
 func NewShotPreviewRunner(repository Repository, agents agent.AgentService, skills agent.SkillRegistry) *Runner {
-	agentInvoker := AgentServiceInvoker{Service: agents}
+	return NewShotPreviewRunnerWithKeys(repository, agents, skills, nil)
+}
+
+// NewShotPreviewRunnerWithKeys allows configuring a KeyUser to resolve credentials for agents dynamically.
+func NewShotPreviewRunnerWithKeys(repository Repository, agents agent.AgentService, skills agent.SkillRegistry, keys llmgateway.KeyUser) *Runner {
+	agentInvoker := AgentServiceInvoker{Service: agents, Keys: keys}
 	return NewRunner(
 		repository,
 		agentInvoker,
@@ -40,10 +47,19 @@ func (i AgentServiceInvoker) InvokeAgent(ctx context.Context, request AgentReque
 	if err != nil {
 		return nil, err
 	}
-	result, err := i.Service.Run(ctx, agent.AgentRequest{
+
+	agentReq := agent.AgentRequest{
 		AgentID: request.AgentID, SessionID: request.TaskID, Input: string(input),
 		UserID: identity.UserID, TenantID: identity.UserID,
-	})
+	}
+
+	if i.Keys != nil && identity.UserID != "" {
+		if usableKey, err := i.Keys.Use(ctx, "", identity.UserID); err == nil && usableKey.APIKey != "" {
+			agentReq.Model = agent.NewChatModelFromKey(usableKey, "")
+		}
+	}
+
+	result, err := i.Service.Run(ctx, agentReq)
 	if err != nil {
 		return nil, err
 	}

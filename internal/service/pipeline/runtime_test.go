@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/S-zhi/blender-shot-preview/internal/agent"
+	llmgateway "github.com/S-zhi/blender-shot-preview/internal/agent/llm_gateway"
 	"github.com/S-zhi/blender-shot-preview/internal/productiontools"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
@@ -68,6 +69,45 @@ func TestAgentServiceInvokerProjectsInputsAndIdentity(t *testing.T) {
 	}
 	if assembly["asset_manifests"] == nil || assembly["shot_plan"] == nil || assembly["output_path"] != "tasks/task-1/scene.blend" {
 		t.Fatalf("scene assembly input is incomplete: %s", service.last.Input)
+	}
+}
+
+type mockKeyUser struct {
+	key llmgateway.UsableKey
+	err error
+}
+
+func (m mockKeyUser) Use(_ context.Context, keyID, userID string) (llmgateway.UsableKey, error) {
+	if m.err != nil {
+		return llmgateway.UsableKey{}, m.err
+	}
+	return m.key, nil
+}
+
+func TestAgentServiceInvokerResolvesAndBindsKeys(t *testing.T) {
+	service := &recordingAgentService{output: `{"ok":true}`}
+	keys := mockKeyUser{
+		key: llmgateway.UsableKey{
+			KeyID:   "k-1",
+			APIKey:  "sk-test-secret-123",
+			BaseURL: "https://api.openai.com/v1",
+		},
+	}
+	invoker := AgentServiceInvoker{Service: service, Keys: keys}
+	taskInput := snapshotForTest(t, map[string]any{
+		"user_id": "user-999", "prompt": "make a test scene",
+	})
+
+	_, err := invoker.InvokeAgent(context.Background(), AgentRequest{
+		TaskID: "task-test", NodeID: NodeIntent, AgentID: "intent-agent", TaskInput: taskInput,
+		Dependencies: DependencyOutputs{NodeInitialize: taskInput},
+	})
+	if err != nil {
+		t.Fatalf("invoke agent: %v", err)
+	}
+
+	if service.last.Model == nil {
+		t.Fatalf("expected request.Model to be populated from Keys, got nil")
 	}
 }
 

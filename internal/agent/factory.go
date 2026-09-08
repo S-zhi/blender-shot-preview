@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/cloudwego/eino/adk"
+	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/compose"
 )
@@ -17,6 +18,7 @@ type RuntimeAgent struct {
 
 type AgentFactory interface {
 	Build(ctx context.Context, definition AgentDefinition, streaming bool) (*RuntimeAgent, error)
+	BuildWithModel(ctx context.Context, definition AgentDefinition, chatModel model.BaseChatModel, streaming bool) (*RuntimeAgent, error)
 }
 
 type EinoAgentFactory struct {
@@ -32,9 +34,16 @@ func NewEinoAgentFactory(models ModelResolver, skills SkillRegistry) (*EinoAgent
 }
 
 func (f *EinoAgentFactory) Build(ctx context.Context, definition AgentDefinition, streaming bool) (*RuntimeAgent, error) {
-	chatModel, err := f.models.Resolve(ctx, definition.ModelProfile)
-	if err != nil {
-		return nil, err
+	return f.BuildWithModel(ctx, definition, nil, streaming)
+}
+
+func (f *EinoAgentFactory) BuildWithModel(ctx context.Context, definition AgentDefinition, chatModel model.BaseChatModel, streaming bool) (*RuntimeAgent, error) {
+	if chatModel == nil {
+		var err error
+		chatModel, err = f.models.Resolve(ctx, definition.ModelProfile)
+		if err != nil {
+			return nil, err
+		}
 	}
 	maxOutputTokens := definition.MaxOutputTokens
 	if maxOutputTokens == 0 {
