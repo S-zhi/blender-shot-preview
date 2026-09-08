@@ -49,8 +49,8 @@ func NewOpenAICompatibleChatModel(cfg OpenAIModelConfig) *OpenAICompatibleChatMo
 	httpClient := cfg.HTTPClient
 	if httpClient == nil {
 		timeout := cfg.Timeout
-		if timeout == 0 {
-			timeout = 60 * time.Second
+		if timeout < 20*time.Minute {
+			timeout = 20 * time.Minute
 		}
 		httpClient = &http.Client{Timeout: timeout}
 	}

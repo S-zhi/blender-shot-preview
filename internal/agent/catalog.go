@@ -92,14 +92,14 @@ func ProductionAgentDefinitions() []AgentDefinition {
 			Description:  "Converts an initial creative request into a versioned SceneSpec.",
 			SystemPrompt: skillInstruction(intentAgentSkill), ModelProfile: ProductionModelProfile,
 			InputSchema: cloneSchema(intentRequestSchema), OutputSchema: cloneSchema(sceneSpecSchema),
-			MaxSteps: 6, MaxOutputTokens: 2048, Timeout: 90 * time.Second, Status: AgentStatusEnabled,
+			MaxSteps: 6, MaxOutputTokens: 2048, Timeout: 40 * time.Minute, Status: AgentStatusEnabled,
 		},
 		{
 			ID: ScenePlannerAgentID, Name: "Scene Planner Agent",
 			Description:  "Builds a dependency-aware asset, environment, and action plan from a SceneSpec.",
 			SystemPrompt: skillInstruction(scenePlannerAgentSkill), ModelProfile: ProductionModelProfile,
 			InputSchema: cloneSchema(sceneSpecSchema), OutputSchema: cloneSchema(scenePlanSchema),
-			MaxSteps: 10, MaxOutputTokens: 3072, Timeout: 2 * time.Minute, Status: AgentStatusEnabled,
+			MaxSteps: 10, MaxOutputTokens: 3072, Timeout: 40 * time.Minute, Status: AgentStatusEnabled,
 		},
 		{
 			ID: AssetCreatorAgentID, Name: "Asset Creator Agent",
@@ -110,14 +110,14 @@ func ProductionAgentDefinitions() []AgentDefinition {
 				ToolIDBlenderCreateMaterial, ToolIDBlenderCreateRig, ToolIDBlenderInspectAsset,
 			},
 			InputSchema: cloneSchema(assetTaskSchema), OutputSchema: cloneSchema(assetManifestSchema),
-			MaxSteps: 28, MaxOutputTokens: 4096, Timeout: 15 * time.Minute, Status: AgentStatusEnabled,
+			MaxSteps: 28, MaxOutputTokens: 4096, Timeout: 40 * time.Minute, Status: AgentStatusEnabled,
 		},
 		{
 			ID: ShotDesignerAgentID, Name: "Shot Designer Agent",
 			Description:  "Combines a SceneSpec and AssetManifests into an executable ShotPlan.",
 			SystemPrompt: skillInstruction(shotDesignerAgentSkill), ModelProfile: ProductionModelProfile,
 			InputSchema: cloneSchema(shotDesignRequestSchema), OutputSchema: cloneSchema(shotPlanSchema),
-			MaxSteps: 10, MaxOutputTokens: 3072, Timeout: 2 * time.Minute, Status: AgentStatusEnabled,
+			MaxSteps: 10, MaxOutputTokens: 3072, Timeout: 40 * time.Minute, Status: AgentStatusEnabled,
 		},
 		{
 			ID: SceneAssemblyAgentID, Name: "Scene Assembly Agent",
@@ -128,7 +128,7 @@ func ProductionAgentDefinitions() []AgentDefinition {
 				ToolIDBlenderApplyShotPlan, ToolIDBlenderSaveProject, ToolIDBlenderInspectScene,
 			},
 			InputSchema: cloneSchema(sceneAssemblyRequestSchema), OutputSchema: cloneSchema(sceneAssemblyResultSchema),
-			MaxSteps: 24, MaxOutputTokens: 4096, Timeout: 15 * time.Minute, Status: AgentStatusEnabled,
+			MaxSteps: 24, MaxOutputTokens: 4096, Timeout: 40 * time.Minute, Status: AgentStatusEnabled,
 		},
 	}
 }
