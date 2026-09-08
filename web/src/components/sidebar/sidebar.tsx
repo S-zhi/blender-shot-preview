@@ -11,8 +11,10 @@ import {
   Folder,
   ChevronLeft,
   Menu,
+  LogOut,
 } from "lucide-react";
 import clsx from "clsx";
+import { logout } from "#/api/client";
 import { useSidebarStore } from "#/stores/sidebar-store";
 import { useConversationStore } from "#/stores/conversation-store";
 import { useNavigationStore } from "#/stores/navigation-store";
@@ -263,18 +265,27 @@ export const Sidebar: React.FC = () => {
           <span className="font-semibold">个人设置</span>
         </button>
 
-        <button
-          onClick={() => setActiveView("settings")}
-          title="系统设置与 LLM 密钥配置"
-          className={clsx(
-            "p-1.5 rounded transition-colors",
-            activeView === "settings"
-              ? "text-white bg-[#151921]"
-              : "text-[#8490a5] hover:text-white hover:bg-[#151921]"
-          )}
-        >
-          <Settings size={16} />
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => setActiveView("settings")}
+            title="系统设置与 LLM 密钥配置"
+            className={clsx(
+              "p-1.5 rounded transition-colors",
+              activeView === "settings"
+                ? "text-white bg-[#151921]"
+                : "text-[#8490a5] hover:text-white hover:bg-[#151921]"
+            )}
+          >
+            <Settings size={16} />
+          </button>
+          <button
+            onClick={() => void logout()}
+            title="退出/锁定当前会话"
+            className="p-1.5 rounded text-[#8490a5] hover:text-red-400 hover:bg-[#151921] transition-colors"
+          >
+            <LogOut size={16} />
+          </button>
+        </div>
       </div>
     </aside>
   );

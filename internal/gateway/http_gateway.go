@@ -2,6 +2,8 @@ package gateway
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -24,7 +26,57 @@ type HTTPGateway struct {
 	assetHandler      *handlerv0_1.AssetHandler
 	assetsDir         string
 	conversationStore service.ConversationStore
+	accessToken       string
+	sessionHash       string
 	mux               *http.ServeMux
+}
+
+func computeSessionHash(token string) string {
+	sum := sha256.Sum256([]byte("bspe_session_salt:" + token))
+	return hex.EncodeToString(sum[:])
+}
+
+// SetAccessToken sets the secret access token required to access the gateway.
+func (g *HTTPGateway) SetAccessToken(token string) {
+	g.accessToken = strings.TrimSpace(token)
+	if g.accessToken != "" {
+		g.sessionHash = computeSessionHash(g.accessToken)
+	} else {
+		g.sessionHash = ""
+	}
+}
+
+func (g *HTTPGateway) isAuthenticated(r *http.Request) bool {
+	if g.accessToken == "" {
+		return true
+	}
+	// 1. Check Cookie
+	if cookie, err := r.Cookie("bspe_session"); err == nil && cookie.Value != "" {
+		if cookie.Value == g.sessionHash {
+			return true
+		}
+	}
+	// 2. Check Authorization Header (Bearer <token>)
+	auth := r.Header.Get("Authorization")
+	if strings.HasPrefix(auth, "Bearer ") {
+		token := strings.TrimSpace(strings.TrimPrefix(auth, "Bearer "))
+		if token == g.accessToken {
+			return true
+		}
+	}
+	return false
+}
+
+func isAuthWhitelist(path string) bool {
+	switch path {
+	case "/health",
+		"/auth/login", "/api/v0_1/auth/login",
+		"/auth/check", "/api/v0_1/auth/check",
+		"/auth/logout", "/api/v0_1/auth/logout":
+		return true
+	default:
+		return false
+	}
 }
 
 func NewHTTPGateway(
@@ -55,7 +107,13 @@ func (g *HTTPGateway) SetAssetsDir(dir string) {
 
 func (g *HTTPGateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Global CORS and content type headers
-	w.Header().Set("Access-Control-Allow-Origin", "*")
+	origin := r.Header.Get("Origin")
+	if origin != "" {
+		w.Header().Set("Access-Control-Allow-Origin", origin)
+		w.Header().Set("Access-Control-Allow-Credentials", "true")
+	} else {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+	}
 	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, DELETE")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With")
 
@@ -64,11 +122,25 @@ func (g *HTTPGateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !isAuthWhitelist(r.URL.Path) && !g.isAuthenticated(r) {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{
+			"error":   "unauthorized",
+			"message": "Access token required. Please authenticate first.",
+		})
+		return
+	}
+
 	g.mux.ServeHTTP(w, r)
 }
 
 func (g *HTTPGateway) routes() {
 	g.mux.HandleFunc("/health", g.handleHealth)
+	g.mux.HandleFunc("/auth/login", g.handleAuthLogin)
+	g.mux.HandleFunc("/api/v0_1/auth/login", g.handleAuthLogin)
+	g.mux.HandleFunc("/auth/check", g.handleAuthCheck)
+	g.mux.HandleFunc("/api/v0_1/auth/check", g.handleAuthCheck)
+	g.mux.HandleFunc("/auth/logout", g.handleAuthLogout)
+	g.mux.HandleFunc("/api/v0_1/auth/logout", g.handleAuthLogout)
 	g.mux.HandleFunc("/api/v0_1/shot-preview/task", g.handleShotPreviewTask)
 	g.mux.HandleFunc("/api/v0_1/shot-preview/task/stream", g.handleShotPreviewStream)
 	g.mux.HandleFunc("/api/v0_1/shot-preview/task/node/confirm", g.handleNodeConfirm)
@@ -134,6 +206,72 @@ func (g *HTTPGateway) handleConversations(w http.ResponseWriter, r *http.Request
 
 func (g *HTTPGateway) handleHealth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+type authLoginPayload struct {
+	Token string `json:"token"`
+}
+
+func (g *HTTPGateway) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req authLoginPayload
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json: " + err.Error()})
+		return
+	}
+	token := strings.TrimSpace(req.Token)
+	if g.accessToken == "" || token == g.accessToken {
+		http.SetCookie(w, &http.Cookie{
+			Name:     "bspe_session",
+			Value:    g.sessionHash,
+			Path:     "/",
+			HttpOnly: true,
+			SameSite: http.SameSiteLaxMode,
+			MaxAge:   86400 * 7,
+		})
+		writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "message": "authenticated"})
+		return
+	}
+	writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid access token"})
+}
+
+func (g *HTTPGateway) handleAuthCheck(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	authed := g.isAuthenticated(r)
+	if authed {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"authenticated": true,
+			"auth_required": g.accessToken != "",
+		})
+		return
+	}
+	writeJSON(w, http.StatusUnauthorized, map[string]any{
+		"authenticated": false,
+		"auth_required": true,
+		"error":         "unauthorized",
+	})
+}
+
+func (g *HTTPGateway) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     "bspe_session",
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   -1,
+	})
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "message": "logged out"})
 }
 
 func (g *HTTPGateway) handleShotPreviewTask(w http.ResponseWriter, r *http.Request) {

@@ -35,6 +35,7 @@ export async function testLLMConnection(params: TestConnectionParams): Promise<T
     const response = await fetch("/api/v0_1/llm-probe", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      credentials: "include",
       body: JSON.stringify({
         provider_type: providerType,
         base_url: cleanBaseUrl,
