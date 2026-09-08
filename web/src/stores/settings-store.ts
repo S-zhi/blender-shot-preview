@@ -81,6 +81,10 @@ const DEFAULT_PROVIDERS: ProviderItem[] = [
 export const useSettingsStore = create<SettingsState>((set, get) => ({
   isModalOpen: false,
   userId: "default_user_001",
+  provider: LLMProvider.OPENAI,
+  modelName: "gpt-4o",
+  apiKey: "",
+  baseUrl: "https://api.openai.com/v1",
   activeTab: "openai",
   providers: DEFAULT_PROVIDERS,
   selectedProviderId: "openai",

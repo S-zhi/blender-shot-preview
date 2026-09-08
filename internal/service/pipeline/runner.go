@@ -198,6 +198,7 @@ func (r *Runner) Retry(ctx context.Context, taskID string) (Task, error) {
 			node.Status = NodeStatusPending
 			node.Attempts = 0
 			node.Error = ""
+			node.ErrorCode = ""
 			node.StartedAt = nil
 			node.FinishedAt = nil
 			node.Output = nil
@@ -637,6 +638,7 @@ func (r *Runner) finishNode(taskID string, nodeID NodeID, output Snapshot, invok
 	var (
 		finalNodeStatus NodeStatus
 		nodeError       string
+		nodeErrorCode   string
 		outSnapshot     Snapshot
 	)
 	err := r.withTask(taskID, func(task *Task) error {
@@ -655,11 +657,16 @@ func (r *Runner) finishNode(taskID string, nodeID NodeID, output Snapshot, invok
 				node.Output = &copyOfOutput
 				node.Status = NodeStatusSucceeded
 				node.Error = ""
+				node.ErrorCode = ""
 				finalNodeStatus = NodeStatusSucceeded
 				outSnapshot = cloneSnapshot(output)
 			} else {
 				node.Error = strings.TrimSpace(invokeErr.Error())
 				nodeError = node.Error
+				if coded, ok := invokeErr.(interface{ ErrorCode() string }); ok {
+					nodeErrorCode = coded.ErrorCode()
+				}
+				node.ErrorCode = nodeErrorCode
 				if node.Attempts < node.MaxAttempts {
 					node.Status = NodeStatusPending
 					node.FinishedAt = nil
@@ -693,6 +700,7 @@ func (r *Runner) finishNode(taskID string, nodeID NodeID, output Snapshot, invok
 			NodeID:    nodeID,
 			Status:    string(NodeStatusFailed),
 			Error:     nodeError,
+			ErrorCode: nodeErrorCode,
 			Timestamp: r.now().UTC(),
 		})
 	}
@@ -703,6 +711,7 @@ func (r *Runner) completeIfBlocked(taskID string) error {
 	var (
 		finalStatus TaskStatus
 		failedError string
+		failedCode  string
 	)
 	err := r.withTask(taskID, func(task *Task) error {
 		if task.Status.Terminal() || task.CancelRequested {
@@ -720,6 +729,7 @@ func (r *Runner) completeIfBlocked(taskID string) error {
 				task.FinishedAt = timePointer(now)
 				finalStatus = TaskStatusFailed
 				failedError = node.Error
+				failedCode = node.ErrorCode
 				for index := range task.Nodes {
 					if task.Nodes[index].Status == NodeStatusPending {
 						task.Nodes[index].Status = NodeStatusCancelled
@@ -768,6 +778,7 @@ func (r *Runner) completeIfBlocked(taskID string) error {
 			Type:      EventTaskFailed,
 			Status:    string(TaskStatusFailed),
 			Error:     failedError,
+			ErrorCode: failedCode,
 			Timestamp: r.now().UTC(),
 		})
 	}

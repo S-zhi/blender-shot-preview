@@ -26,8 +26,10 @@ export async function request<T>(
     ...options.headers,
   };
 
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 30000);
   try {
-    const response = await fetch(url, { ...options, headers });
+    const response = await fetch(url, { ...options, headers, signal: controller.signal });
     if (!response.ok) {
       let errorData;
       try {
@@ -44,6 +46,11 @@ export async function request<T>(
     return (await response.json()) as T;
   } catch (err: unknown) {
     if (err instanceof ApiClientError) throw err;
+    if ((err as Error)?.name === "AbortError") {
+      throw new ApiClientError(408, "Request timed out");
+    }
     throw new ApiClientError(500, (err as Error).message || "Network Error");
+  } finally {
+    clearTimeout(timeoutId);
   }
 }

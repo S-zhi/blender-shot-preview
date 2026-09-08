@@ -111,6 +111,7 @@ export const MessageItem: React.FC<MessageItemProps> = ({ message }) => {
           <ThoughtBox
             thoughts={message.thoughts || []}
             isThinking={message.isThinking}
+            status={message.status}
           />
         )}
 

@@ -19,6 +19,8 @@ export const ChatArea: React.FC = () => {
   );
 
   const messages = currentConversation?.messages || [];
+  const activeMessage = [...messages].reverse().find((message) => message.role === "assistant");
+  const connectionFailed = activeMessage?.status === "error" || activeMessage?.status === "timeout" || activeMessage?.status === "disconnected";
 
   // Scroll to bottom when new messages arrive
   useEffect(() => {
@@ -44,9 +46,9 @@ export const ChatArea: React.FC = () => {
             <h2 className="text-sm font-semibold text-content truncate max-w-xs md:max-w-md">
               {currentConversation?.title || "分镜预览控制台"}
             </h2>
-            <Badge variant="info" className="hidden sm:inline-flex text-[11px]">
+            <Badge variant={connectionFailed ? "danger" : isGenerating ? "info" : "success"} className="hidden sm:inline-flex text-[11px]">
               <CheckCircle size={11} />
-              {isGenerating ? "生成中" : "就绪 (Ready)"}
+              {connectionFailed ? "LLM / 后端连接失败" : isGenerating ? "生成中" : "就绪 (Ready)"}
             </Badge>
           </div>
         </div>
@@ -88,6 +90,12 @@ export const ChatArea: React.FC = () => {
           </button>
         </div>
       </header>
+
+      {connectionFailed && activeMessage?.content && (
+        <div className="shrink-0 border-b border-status-fail-border bg-status-fail-bg px-4 py-2 text-xs text-status-fail-text">
+          {activeMessage.content.replace(/^### .*\n\n/, "").replace(/\*\*/g, "")}
+        </div>
+      )}
 
       {/* Main Tab Content */}
       <div className="flex-1 overflow-y-auto flex flex-col">

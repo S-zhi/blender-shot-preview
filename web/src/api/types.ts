@@ -186,6 +186,7 @@ export interface PipelineEvent {
   input?: string;
   output?: string;
   error?: string;
+  error_code?: string;
   artifacts?: TaskArtifactView[];
   timestamp: string;
 }
@@ -213,7 +214,16 @@ export interface Message {
   thoughts?: string[];
   isThinking?: boolean;
   taskId?: string;
-  status?: "sending" | "thought" | "done" | "error";
+  status?:
+    | "sending"
+    | "connecting"
+    | "running"
+    | "waiting_confirmation"
+    | "thought"
+    | "done"
+    | "timeout"
+    | "disconnected"
+    | "error";
   nodes?: TaskNodeView[];
   artifacts?: TaskArtifactView[];
   waitingNode?: TaskNodeView | null;

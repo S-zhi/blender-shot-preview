@@ -467,26 +467,31 @@ func (g *HTTPGateway) handleShotPreviewStream(w http.ResponseWriter, r *http.Req
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no")
 
-	// 1. Send current task snapshot if exists
-	if currentTask, err := shotSvc.GetTask(r.Context(), service.GetTaskRequest{UserID: userID, TaskID: taskID}); err == nil {
-		data, _ := json.Marshal(map[string]any{
-			"type": "task_snapshot",
-			"task": currentTask,
-		})
-		fmt.Fprintf(w, "event: task_snapshot\ndata: %s\n\n", string(data))
-		flusher.Flush()
-		if currentTask.Status == service.TaskStatusSucceeded || currentTask.Status == service.TaskStatusFailed || currentTask.Status == service.TaskStatusCancelled {
-			return
-		}
-	}
-
-	// 2. Subscribe to real-time events
+	// Subscribe before reading the snapshot so a fast task failure cannot land
+	// between the initial read and event registration.
 	events, unsub, err := shotSvc.SubscribeEvents(r.Context(), taskID)
 	if err != nil {
 		http.Error(w, "failed to subscribe: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 	defer unsub()
+
+	// Send the current task snapshot after subscription. The snapshot is the
+	// source of truth for clients that connect after the task has finished.
+	currentTask, err := shotSvc.GetTask(r.Context(), service.GetTaskRequest{UserID: userID, TaskID: taskID})
+	if err != nil {
+		http.Error(w, "shot preview task unavailable", http.StatusNotFound)
+		return
+	}
+	data, _ := json.Marshal(map[string]any{
+		"type": "task_snapshot",
+		"task": currentTask,
+	})
+	fmt.Fprintf(w, "event: task_snapshot\ndata: %s\n\n", string(data))
+	flusher.Flush()
+	if currentTask.Status == service.TaskStatusSucceeded || currentTask.Status == service.TaskStatusFailed || currentTask.Status == service.TaskStatusCancelled {
+		return
+	}
 
 	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()

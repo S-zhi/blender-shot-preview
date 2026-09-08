@@ -230,6 +230,7 @@ type Node struct {
 	Attempts    int
 	MaxAttempts int
 	Error       string
+	ErrorCode   string
 	StartedAt   *time.Time
 	FinishedAt  *time.Time
 }
@@ -292,6 +293,7 @@ type PipelineEvent struct {
 	Input     string             `json:"input,omitempty"`
 	Output    string             `json:"output,omitempty"`
 	Error     string             `json:"error,omitempty"`
+	ErrorCode string             `json:"error_code,omitempty"`
 	Artifacts []ArtifactSnapshot `json:"artifacts,omitempty"`
 	Timestamp time.Time          `json:"timestamp"`
 }

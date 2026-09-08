@@ -127,6 +127,7 @@ type NodeView struct {
 	Attempts   int
 	Input      *string
 	Output     *string
+	ErrorCode  string
 	StartedAt  *time.Time
 	FinishedAt *time.Time
 	Failure    *FailureView

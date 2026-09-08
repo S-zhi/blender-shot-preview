@@ -4,11 +4,13 @@ import { ChevronDown, ChevronRight, Loader2, Sparkles } from "lucide-react";
 interface ThoughtBoxProps {
   thoughts: string[];
   isThinking?: boolean;
+  status?: string;
 }
 
 export const ThoughtBox: React.FC<ThoughtBoxProps> = ({
   thoughts,
   isThinking = false,
+  status,
 }) => {
   const [isExpanded, setIsExpanded] = useState(true);
 
@@ -29,9 +31,19 @@ export const ThoughtBox: React.FC<ThoughtBoxProps> = ({
             <Sparkles size={13} className="text-amber-400" />
           )}
           <span>
-            {isThinking
-              ? "Agent 正在规划镜头轨迹与分析场景..."
-              : `思考与场景分析过程 (${thoughts.length} 步)`}
+            {status === "connecting"
+              ? "正在连接模型服务..."
+              : status === "waiting_confirmation"
+                ? "等待确认后继续执行..."
+                : status === "timeout"
+                  ? "模型服务响应超时"
+                  : status === "disconnected"
+                    ? "实时执行流已断开"
+                    : status === "error"
+                      ? "Agent 执行失败"
+                      : isThinking
+                        ? "Agent 正在规划镜头轨迹与分析场景..."
+                        : `思考与场景分析过程 (${thoughts.length} 步)`}
           </span>
         </div>
 

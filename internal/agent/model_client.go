@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -144,30 +145,40 @@ func (m *OpenAICompatibleChatModel) Generate(ctx context.Context, input []*schem
 
 	httpResp, err := m.httpClient.Do(httpReq)
 	if err != nil {
-		return nil, fmt.Errorf("execute openai http request: %w", err)
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return nil, &LLMError{Code: LLMTimeout, Cause: errors.New("model request timed out")}
+		}
+		return nil, &LLMError{Code: LLMConnectionFailed, Cause: errors.New("model endpoint is unreachable")}
 	}
 	defer httpResp.Body.Close()
 
 	respBytes, err := io.ReadAll(httpResp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("read openai http response: %w", err)
+		return nil, &LLMError{Code: LLMConnectionFailed, Cause: errors.New("failed to read model response")}
 	}
 
 	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
-		return nil, fmt.Errorf("openai request failed (status %d): %s", httpResp.StatusCode, string(respBytes))
+		code := LLMProviderError
+		switch httpResp.StatusCode {
+		case http.StatusUnauthorized, http.StatusForbidden:
+			code = LLMAuthFailed
+		case http.StatusTooManyRequests:
+			code = LLMRateLimited
+		}
+		return nil, &LLMError{Code: code, Cause: fmt.Errorf("model provider returned HTTP %d", httpResp.StatusCode)}
 	}
 
 	var chatResp openAIChatResponse
 	if err := json.Unmarshal(respBytes, &chatResp); err != nil {
-		return nil, fmt.Errorf("unmarshal openai http response: %w", err)
+		return nil, &LLMError{Code: LLMInvalidResponse, Cause: errors.New("model response is not valid JSON")}
 	}
 
 	if chatResp.Error != nil {
-		return nil, fmt.Errorf("openai error: %s (%s)", chatResp.Error.Message, chatResp.Error.Type)
+		return nil, &LLMError{Code: LLMProviderError, Cause: errors.New("model provider returned an error")}
 	}
 
 	if len(chatResp.Choices) == 0 {
-		return nil, fmt.Errorf("openai returned no choices in response")
+		return nil, &LLMError{Code: LLMInvalidResponse, Cause: errors.New("model response contained no choices")}
 	}
 
 	choice := chatResp.Choices[0]

@@ -54,6 +54,24 @@ func (s *inMemoryCredentialStore) Find(_ context.Context, keyID string) (llm_gat
 	return record, nil
 }
 
+func (s *inMemoryCredentialStore) FindActiveByUser(_ context.Context, userID string) (llm_gateway.CredentialRecord, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var selected llm_gateway.CredentialRecord
+	for _, record := range s.credentials {
+		if record.UserID != userID || !record.Enabled {
+			continue
+		}
+		if selected.ID == "" || record.CreatedAt.After(selected.CreatedAt) {
+			selected = record
+		}
+	}
+	if selected.ID == "" {
+		return llm_gateway.CredentialRecord{}, llm_gateway.ErrCredentialNotFound
+	}
+	return selected, nil
+}
+
 func (s *inMemoryCredentialStore) Update(_ context.Context, record llm_gateway.CredentialRecord) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -218,6 +236,7 @@ func buildPipelineRunner(keyUser llm_gateway.KeyUser) *pipeline.Runner {
 	repo := pipeline.NewMemoryRepository()
 	defRepo := agent.NewMemoryDefinitionRepository()
 	runRepo := agent.NewMemoryRunRepository()
+	devMode := strings.EqualFold(strings.TrimSpace(os.Getenv("SHOT_PREVIEW_DEV_MODE")), "true")
 	modelResolver := agent.NewStaticModelResolver(map[string]model.BaseChatModel{
 		agent.ProductionModelProfile: &devChatModel{},
 	})
@@ -250,6 +269,11 @@ func buildPipelineRunner(keyUser llm_gateway.KeyUser) *pipeline.Runner {
 		return nil
 	}
 
+	if devMode {
+		// Development mode is explicit and intentionally bypasses credential
+		// resolution so the deterministic devChatModel remains usable in tests.
+		return pipeline.NewShotPreviewRunner(repo, agentSvc, skillRegistry)
+	}
 	return pipeline.NewShotPreviewRunnerWithKeys(repo, agentSvc, skillRegistry, keyUser)
 }
 
@@ -330,4 +354,3 @@ func (devProcess) Wait() (productiontools.CommandResult, error) {
 	return productiontools.CommandResult{ExitCode: 0}, nil
 }
 func (devProcess) Kill() error { return nil }
-
