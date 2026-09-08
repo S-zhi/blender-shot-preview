@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -249,3 +250,158 @@ func assertJSONEqual(t *testing.T, actual, expected string) {
 		t.Fatalf("JSON mismatch: got %s want %s", actualJSON, expectedJSON)
 	}
 }
+
+func TestShotPreviewWorkflowEndToEnd(t *testing.T) {
+	registry := agent.NewMemorySkillRegistry()
+	scripted := &scriptedTool{responses: map[string][]string{
+		productiontools.ToolBlenderRenderSubmit: {
+			`{"ok":true,"data":{"job_id":"preview-job"}}`,
+			`{"ok":true,"data":{"job_id":"final-job"}}`,
+		},
+		productiontools.ToolBlenderRenderStatus: {
+			`{"ok":true,"data":{"status":"succeeded"}}`,
+			`{"ok":true,"data":{"status":"succeeded"}}`,
+		},
+		productiontools.ToolBlenderRenderArtifact: {
+			`{"ok":true,"data":{"artifact_path":"tasks/task-1/preview/frame_0001.png"}}`,
+			`{"ok":true,"data":{"artifact_path":"tasks/task-1/final/frame_0001.png"}}`,
+		},
+		productiontools.ToolFFmpegEncode: {
+			`{"ok":true,"data":{"output_path":"tasks/task-1/shot-preview.mp4","codec":"libx264","fps":24}}`,
+		},
+		productiontools.ToolFFprobeInspect: {
+			`{"ok":true,"data":{"format":{"duration":"10.0"}}}`,
+		},
+	}}
+	registerScriptedTools(t, registry, scripted,
+		productiontools.ToolBlenderRenderSubmit,
+		productiontools.ToolBlenderRenderStatus,
+		productiontools.ToolBlenderRenderArtifact,
+		productiontools.ToolFFmpegEncode,
+		productiontools.ToolFFprobeInspect,
+	)
+
+	agentResponses := map[string]string{
+		"intent-agent": `{
+			"version": "scene-spec/v1",
+			"scene_id": "scene-1",
+			"summary": "forest establishing shot",
+			"style": {"visual_style": "realistic", "mood": "peaceful"},
+			"environment": {"location": "forest", "lighting": "daylight"},
+			"assets": [],
+			"actions": [],
+			"shots": []
+		}`,
+		"scene-planner-agent": `{
+			"version": "scene-plan/v1",
+			"scene_id": "scene-1",
+			"asset_tasks": [
+				{
+					"task_id": "task-tree",
+					"asset_id": "tree",
+					"asset_kind": "model",
+					"description": "pine tree",
+					"depends_on": [],
+					"output_path": "assets/tree.blend"
+				}
+			],
+			"environment_plan": {},
+			"action_plan": []
+		}`,
+		"asset-creator-agent": `{
+			"version": "asset-manifest/v1",
+			"asset_id": "tree",
+			"asset_kind": "model",
+			"source_files": [],
+			"blend_file": "assets/tree.blend",
+			"inspection": {"passed": true}
+		}`,
+		"shot-designer-agent": `{
+			"version": "shot-plan/v1",
+			"scene_id": "scene-1",
+			"shots": [{"id": "shot-1"}],
+			"constraints": {}
+		}`,
+		"scene-assembly-agent": `{
+			"version": "scene-assembly/v1",
+			"scene_id": "scene-1",
+			"blend_file": "tasks/task-1/scene.blend",
+			"inspection": {"passed": true}
+		}`,
+	}
+
+	mockAgents := &e2eAgentService{responses: agentResponses}
+	runner := NewShotPreviewRunner(NewMemoryRepository(), mockAgents, registry)
+
+	taskInput := snapshotForTest(t, map[string]any{
+		"user_id":         "user-1",
+		"prompt":          "Create a peaceful forest shot",
+		"conversation_id": "conv-1",
+		"request_id":      "req-1",
+	})
+
+	task, created, err := runner.Submit(context.Background(), Submission{
+		IdempotencyKey: "e2e-workflow-test",
+		Input:          taskInput,
+		Workflow:       ShotPreviewWorkflow(taskInput.JSON),
+	})
+	if err != nil || !created {
+		t.Fatalf("Submit() err=%v created=%t", err, created)
+	}
+
+	deadline := time.Now().Add(5 * time.Second)
+	var finalTask Task
+	for time.Now().Before(deadline) {
+		current, err := runner.Get(context.Background(), task.ID)
+		if err != nil {
+			t.Fatalf("Get() err=%v", err)
+		}
+		if current.Status.Terminal() {
+			finalTask = current
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if finalTask.Status != TaskStatusSucceeded {
+		t.Fatalf("pipeline task status = %s, want %s (nodes: %+v)", finalTask.Status, TaskStatusSucceeded, finalTask.Nodes)
+	}
+
+	if len(finalTask.Nodes) != 13 {
+		t.Fatalf("expected 13 nodes, got %d", len(finalTask.Nodes))
+	}
+
+	for _, node := range finalTask.Nodes {
+		if node.Status != NodeStatusSucceeded {
+			t.Fatalf("node %s status = %s, want %s", node.ID, node.Status, NodeStatusSucceeded)
+		}
+	}
+}
+
+type e2eAgentService struct {
+	responses map[string]string
+}
+
+func (s *e2eAgentService) Run(_ context.Context, request agent.AgentRequest) (*agent.AgentResult, error) {
+	resp, ok := s.responses[request.AgentID]
+	if !ok {
+		return nil, fmt.Errorf("unexpected agent: %s", request.AgentID)
+	}
+	return &agent.AgentResult{
+		Status: agent.RunStatusSucceeded,
+		Output: resp,
+	}, nil
+}
+func (*e2eAgentService) Stream(context.Context, agent.AgentRequest) (<-chan agent.AgentEvent, error) {
+	return nil, errors.New("not implemented")
+}
+func (*e2eAgentService) Submit(context.Context, agent.AgentRequest) (string, error) {
+	return "", errors.New("not implemented")
+}
+func (*e2eAgentService) GetRun(context.Context, string) (*agent.AgentRun, error) {
+	return nil, errors.New("not implemented")
+}
+func (*e2eAgentService) Cancel(context.Context, string) error {
+	return errors.New("not implemented")
+}
+

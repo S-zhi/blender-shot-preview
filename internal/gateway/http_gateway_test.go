@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -66,3 +67,72 @@ func TestHTTPGateway_Routes(t *testing.T) {
 		t.Errorf("expected 200 from POST /api/v0_1/assets, got %d: %s", wPost.Code, wPost.Body.String())
 	}
 }
+
+func TestHTTPGateway_ShotPreviewTask(t *testing.T) {
+	stub := &stubShotPreviewService{
+		task: service.TaskView{
+			TaskID:          "task-test-1",
+			Status:          service.TaskStatusRunning,
+			WorkflowID:      service.ShotPreviewWorkflowID,
+			WorkflowVersion: service.ShotPreviewWorkflowVersion,
+			Nodes: []service.NodeView{
+				{ID: "Initialize", Status: service.NodeStatusSucceeded},
+			},
+		},
+	}
+	shotHandler := handlerv0_1.NewShotPreviewHandler(stub)
+	gw := NewHTTPGateway(shotHandler, nil, nil)
+
+	// 1. Test POST /api/v0_1/shot-preview/task
+	createReq := api.CreateShotPreviewTaskRequest{
+		UserId: "default_user_001",
+		Prompt: "establish shot of mountains",
+	}
+	createBody, _ := json.Marshal(createReq)
+	reqPost := httptest.NewRequest(http.MethodPost, "/api/v0_1/shot-preview/task", bytes.NewReader(createBody))
+	wPost := httptest.NewRecorder()
+	gw.ServeHTTP(wPost, reqPost)
+	if wPost.Code != http.StatusOK {
+		t.Fatalf("expected 200 from POST /api/v0_1/shot-preview/task, got %d: %s", wPost.Code, wPost.Body.String())
+	}
+	var createRes api.CreateShotPreviewTaskResponse
+	if err := json.Unmarshal(wPost.Body.Bytes(), &createRes); err != nil {
+		t.Fatalf("failed to decode create task response: %v", err)
+	}
+	if createRes.TaskId != "task-test-1" {
+		t.Fatalf("expected task-test-1, got %s", createRes.TaskId)
+	}
+
+	// 2. Test GET /api/v0_1/shot-preview/task?task_id=task-test-1&user_id=default_user_001
+	reqGet := httptest.NewRequest(http.MethodGet, "/api/v0_1/shot-preview/task?task_id=task-test-1&user_id=default_user_001", nil)
+	wGet := httptest.NewRecorder()
+	gw.ServeHTTP(wGet, reqGet)
+	if wGet.Code != http.StatusOK {
+		t.Fatalf("expected 200 from GET /api/v0_1/shot-preview/task, got %d: %s", wGet.Code, wGet.Body.String())
+	}
+	var getRes api.GetShotPreviewTaskResponse
+	if err := json.Unmarshal(wGet.Body.Bytes(), &getRes); err != nil {
+		t.Fatalf("failed to decode get task response: %v", err)
+	}
+	if getRes.Task == nil || getRes.Task.TaskId != "task-test-1" {
+		t.Fatalf("expected task-test-1 in get response, got %+v", getRes.Task)
+	}
+}
+
+type stubShotPreviewService struct {
+	task service.TaskView
+}
+
+func (s *stubShotPreviewService) CreateTask(_ context.Context, req service.CreateTaskRequest) (service.CreateTaskResult, error) {
+	return service.CreateTaskResult{TaskID: "task-test-1", RequestID: req.RequestID, Status: service.CreateStatusAccepted}, nil
+}
+func (s *stubShotPreviewService) GetTask(_ context.Context, _ service.GetTaskRequest) (service.TaskView, error) {
+	return s.task, nil
+}
+func (s *stubShotPreviewService) CancelTask(_ context.Context, _ service.CancelTaskRequest) (service.TaskView, error) {
+	return s.task, nil
+}
+func (s *stubShotPreviewService) RetryTask(_ context.Context, _ service.RetryTaskRequest) (service.TaskView, error) {
+	return s.task, nil
+}
+
