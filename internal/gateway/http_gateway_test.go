@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -65,6 +66,26 @@ func TestHTTPGateway_Routes(t *testing.T) {
 	gw.ServeHTTP(wPost, reqPost)
 	if wPost.Code != http.StatusOK {
 		t.Errorf("expected 200 from POST /api/v0_1/assets, got %d: %s", wPost.Code, wPost.Body.String())
+	}
+
+	// 5. Test POST /api/v0_1/assets/upload (multipart .blend upload)
+	var b bytes.Buffer
+	w := multipart.NewWriter(&b)
+	part, err := w.CreateFormFile("file", "heroine_alita_rigged.blend")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = part.Write([]byte("BLENDER_v401\x00Armature_Rigify\x00Bone_head\x00"))
+	_ = w.WriteField("user_id", "default_user_001")
+	_ = w.WriteField("name", "heroine_alita_rigged.blend")
+	_ = w.Close()
+
+	reqUpload := httptest.NewRequest(http.MethodPost, "/api/v0_1/assets/upload", &b)
+	reqUpload.Header.Set("Content-Type", w.FormDataContentType())
+	wUpload := httptest.NewRecorder()
+	gw.ServeHTTP(wUpload, reqUpload)
+	if wUpload.Code != http.StatusOK {
+		t.Errorf("expected 200 from POST /api/v0_1/assets/upload, got %d: %s", wUpload.Code, wUpload.Body.String())
 	}
 }
 

@@ -2,11 +2,17 @@ package gateway
 
 import (
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	handlerv0_1 "github.com/S-zhi/blender-shot-preview/internal/handler/v0_1"
+	"github.com/S-zhi/blender-shot-preview/internal/service"
 	api "github.com/S-zhi/blender-shot-preview/kitex_gen/handler/v0_1"
 )
 
@@ -51,6 +57,7 @@ func (g *HTTPGateway) routes() {
 	g.mux.HandleFunc("/api/v0_1/shot-preview/task", g.handleShotPreviewTask)
 	g.mux.HandleFunc("/api/v0_1/llm-gateway/key", g.handleLLMKey)
 	g.mux.HandleFunc("/api/v0_1/assets", g.handleAssets)
+	g.mux.HandleFunc("/api/v0_1/assets/upload", g.handleAssetUpload)
 	g.mux.HandleFunc("/api/v0_1/assets/stats", g.handleAssetStats)
 	g.mux.HandleFunc("/api/v0_1/assets/delete", g.handleAssetDelete)
 }
@@ -233,6 +240,87 @@ func (g *HTTPGateway) handleAssetDelete(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	writeJSON(w, http.StatusOK, res)
+}
+
+func (g *HTTPGateway) handleAssetUpload(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// 128 MB max upload
+	if err := r.ParseMultipartForm(128 << 20); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "failed to parse multipart form: " + err.Error()})
+		return
+	}
+
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "file field is required in multipart form"})
+		return
+	}
+	defer file.Close()
+
+	userID := r.FormValue("user_id")
+	if strings.TrimSpace(userID) == "" {
+		userID = "default_user_001"
+	}
+
+	assetName := strings.TrimSpace(r.FormValue("name"))
+	if assetName == "" {
+		assetName = header.Filename
+	}
+
+	// Prepare storage directory
+	uploadDir := filepath.Join("data", "assets", "uploads")
+	_ = os.MkdirAll(uploadDir, 0755)
+
+	targetFilename := fmt.Sprintf("%d_%s", time.Now().UnixNano(), filepath.Base(header.Filename))
+	targetPath := filepath.Join(uploadDir, targetFilename)
+
+	dst, err := os.Create(targetPath)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save file: " + err.Error()})
+		return
+	}
+	defer dst.Close()
+
+	written, err := io.Copy(dst, file)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to write file content: " + err.Error()})
+		return
+	}
+
+	// Run automatic Blender inspection & character feature extraction
+	regReq, spec, err := service.InspectAndBuildRegisterRequest(userID, assetName, targetPath, written)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to analyze asset: " + err.Error()})
+		return
+	}
+
+	if g.assetHandler == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "asset handler unavailable"})
+		return
+	}
+
+	res, err := g.assetHandler.RegisterAsset(r.Context(), regReq)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to register asset: " + err.Error()})
+		return
+	}
+
+	// Return registered view along with extracted character specs
+	responsePayload := map[string]any{
+		"asset_id":       res.AssetId,
+		"name":           regReq.Name,
+		"file_format":    regReq.FileFormat,
+		"file_size":      regReq.FileSizeBytes,
+		"storage_uri":    regReq.StorageUri,
+		"character_spec": spec,
+		"status":         res.Status,
+	}
+
+	writeJSON(w, http.StatusOK, responsePayload)
 }
 
 func (g *HTTPGateway) handleAssetStats(w http.ResponseWriter, r *http.Request) {

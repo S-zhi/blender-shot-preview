@@ -3,3 +3,6 @@ output/
 .idea/
 __pycache__/
 *.pyc
+data/
+web/dist/
+web/node_modules/
