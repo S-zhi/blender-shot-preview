@@ -35,14 +35,14 @@ export const EmptyState: React.FC<EmptyStateProps> = ({ onSelectPrompt }) => {
 
   return (
     <div className="flex-1 flex flex-col items-center justify-center p-6 text-center select-none max-w-2xl mx-auto">
-      <div className="h-14 w-14 rounded-2xl bg-brand-primary/10 border border-brand-primary/20 text-brand-primary flex items-center justify-center mb-5 shadow-lg shadow-brand-primary/5">
+      <div className="h-14 w-14 rounded-2xl bg-surface-card border border-brand-primary/20 text-brand-primary flex items-center justify-center mb-5 shadow-lg shadow-brand-primary/5">
         <Sparkles size={28} />
       </div>
 
-      <h1 className="text-2xl font-bold tracking-tight text-white mb-2">
+      <h1 className="text-2xl font-bold tracking-tight text-content mb-2">
         Blender 分镜智能预览工作台
       </h1>
-      <p className="text-sm text-gray-400 mb-8 max-w-md leading-relaxed">
+      <p className="text-sm text-content-muted mb-8 max-w-md leading-relaxed">
         基于 OpenHands 架构设计。描述您期望的镜头轨迹、光影构图与机位运镜，系统将调度后台任务生成分镜预览。
       </p>
 
@@ -54,13 +54,13 @@ export const EmptyState: React.FC<EmptyStateProps> = ({ onSelectPrompt }) => {
             <button
               key={idx}
               onClick={() => onSelectPrompt(item.prompt)}
-              className="p-3.5 rounded-xl bg-surface-300/70 hover:bg-surface-200/90 border border-border-subtle hover:border-border-default transition-all duration-150 group cursor-pointer text-left"
+              className="p-3.5 rounded-xl bg-surface-card hover:bg-surface-elevated border border-border hover:border-border-hover hover:-translate-y-0.5 transition-all duration-150 group cursor-pointer text-left"
             >
-              <div className="flex items-center gap-2.5 mb-1.5 text-gray-200 group-hover:text-brand-primary font-medium text-xs">
+              <div className="flex items-center gap-2.5 mb-1.5 text-content group-hover:text-brand-primary font-medium text-xs">
                 <Icon size={15} className="text-brand-primary/80" />
                 <span>{item.title}</span>
               </div>
-              <p className="text-[11px] text-gray-400 line-clamp-2 leading-normal">
+              <p className="text-[11px] text-content-muted line-clamp-2 leading-normal">
                 {item.desc}
               </p>
             </button>

@@ -35,17 +35,17 @@ export const ConversationList: React.FC = () => {
 
   if (filteredConversations.length === 0) {
     return (
-      <div className="px-4 py-8 text-center text-xs text-gray-500">
+      <div className="px-4 py-8 text-center text-xs text-content-muted">
         暂无匹配的历史分镜会话
       </div>
     );
   }
 
   return (
-    <div className="flex-1 overflow-y-auto px-2 space-y-4">
+    <div className="flex-1 overflow-y-auto px-2.5 space-y-4">
       {today.length > 0 && (
         <div className="space-y-1">
-          <div className="px-3 py-1 text-[11px] font-semibold tracking-wider text-gray-500 uppercase">
+          <div className="px-3 py-1 text-[11px] font-semibold tracking-wider text-content-muted uppercase">
             今天
           </div>
           {today.map((conv) => (
@@ -60,7 +60,7 @@ export const ConversationList: React.FC = () => {
 
       {previous.length > 0 && (
         <div className="space-y-1">
-          <div className="px-3 py-1 text-[11px] font-semibold tracking-wider text-gray-500 uppercase">
+          <div className="px-3 py-1 text-[11px] font-semibold tracking-wider text-content-muted uppercase">
             更早之前
           </div>
           {previous.map((conv) => (

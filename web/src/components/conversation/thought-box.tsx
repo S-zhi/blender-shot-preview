@@ -15,14 +15,14 @@ export const ThoughtBox: React.FC<ThoughtBoxProps> = ({
   if (thoughts.length === 0 && !isThinking) return null;
 
   return (
-    <div className="my-2 border border-border-subtle bg-surface-300/60 rounded-xl overflow-hidden text-xs transition-all">
+    <div className="my-2 border border-border bg-surface-card rounded-xl overflow-hidden text-xs transition-all">
       {/* Header Bar */}
       <button
         type="button"
         onClick={() => setIsExpanded(!isExpanded)}
-        className="w-full flex items-center justify-between px-3.5 py-2 hover:bg-surface-200/50 transition-colors text-left"
+        className="w-full flex items-center justify-between px-3.5 py-2 hover:bg-surface-elevated transition-colors text-left"
       >
-        <div className="flex items-center gap-2 text-gray-300 font-medium">
+        <div className="flex items-center gap-2 text-content-muted font-medium">
           {isThinking ? (
             <Loader2 size={13} className="animate-spin text-brand-primary" />
           ) : (
@@ -35,22 +35,22 @@ export const ThoughtBox: React.FC<ThoughtBoxProps> = ({
           </span>
         </div>
 
-        <div className="text-gray-500">
+        <div className="text-content-icon">
           {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
         </div>
       </button>
 
       {/* Expanded Step List */}
       {isExpanded && (
-        <div className="px-3.5 pb-3 pt-1 space-y-1.5 border-t border-border-subtle/50 font-mono text-[11px] text-gray-400">
+        <div className="px-3.5 pb-3 pt-1 space-y-1.5 border-t border-border font-mono text-[11px] text-content-muted">
           {thoughts.map((step, idx) => (
             <div key={idx} className="flex items-start gap-2">
               <span className="text-brand-primary/80 shrink-0">[{idx + 1}]</span>
-              <span className="leading-relaxed text-gray-300">{step}</span>
+              <span className="leading-relaxed text-content-muted">{step}</span>
             </div>
           ))}
           {isThinking && (
-            <div className="flex items-center gap-2 text-brand-primary/70 italic animate-pulse">
+            <div className="flex items-center gap-2 text-brand-primary italic animate-pulse">
               <span>...</span>
               <span>执行下一步计算中</span>
             </div>
