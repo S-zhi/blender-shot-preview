@@ -111,10 +111,15 @@ func main() {
 	}
 
 	// 1. Initialize shared services & handlers
+	workspaceDir := getWorkspaceDir()
+	assetStore, err := service.NewFileAssetStore(filepath.Join(workspaceDir, "assets", "metadata.json"))
+	if err != nil {
+		log.Fatalf("failed to initialize asset store: %v", err)
+	}
 	runner := buildPipelineRunner(keyManager)
 	shotPreviewSvc := service.NewShotPreviewService(runner)
 	llmKeySvc := service.NewLLMKeyService(keyManager)
-	assetSvc := service.NewAssetService(nil)
+	assetSvc := service.NewAssetService(assetStore)
 
 	shotHandler := handlerv0_1.NewShotPreviewHandler(shotPreviewSvc)
 	keyHandler := handlerv0_1.NewLLMKeyHandler(llmKeySvc)
@@ -136,6 +141,7 @@ func main() {
 
 	// 3. Start HTTP Gateway on 127.0.0.1:8888 for Web Frontend
 	httpGateway := gateway.NewHTTPGateway(shotHandler, keyHandler, assetHandler)
+	httpGateway.SetAssetsDir(filepath.Join(workspaceDir, "assets"))
 	httpServer := &http.Server{
 		Addr:    "127.0.0.1:8888",
 		Handler: httpGateway,
@@ -152,11 +158,13 @@ func newServer(manager llm_gateway.KeyManager, opts ...server.Option) (server.Se
 	if ku, ok := manager.(llm_gateway.KeyUser); ok {
 		keyUser = ku
 	}
+	workspaceDir := getWorkspaceDir()
+	assetStore, _ := service.NewFileAssetStore(filepath.Join(workspaceDir, "assets", "metadata.json"))
 	runner := buildPipelineRunner(keyUser)
 	shotPreviewSvc := service.NewShotPreviewService(runner)
 	shotHandler := handlerv0_1.NewShotPreviewHandler(shotPreviewSvc)
 	keyHandler := handlerv0_1.NewLLMKeyHandler(service.NewLLMKeyService(manager))
-	assetHandler := handlerv0_1.NewAssetHandler(service.NewAssetService(nil))
+	assetHandler := handlerv0_1.NewAssetHandler(service.NewAssetService(assetStore))
 	return newServerWithHandlers(shotHandler, keyHandler, assetHandler, opts...)
 }
 
@@ -176,7 +184,7 @@ func newServerWithHandlers(
 	return svr, nil
 }
 
-func buildPipelineRunner(keyUser llm_gateway.KeyUser) *pipeline.Runner {
+func getWorkspaceDir() string {
 	workspaceDir := os.Getenv("BLENDER_WORKSPACE")
 	if workspaceDir == "" {
 		workspaceDir = filepath.Join(os.TempDir(), "blender-shot-preview")
@@ -185,7 +193,11 @@ func buildPipelineRunner(keyUser llm_gateway.KeyUser) *pipeline.Runner {
 	_ = os.MkdirAll(filepath.Join(workspaceDir, "tasks"), 0755)
 	_ = os.MkdirAll(filepath.Join(workspaceDir, "assets"), 0755)
 	_ = os.WriteFile(filepath.Join(workspaceDir, "tasks", "scene.blend"), []byte("BLENDER DEV PLACEHOLDER"), 0644)
-	_ = os.WriteFile(filepath.Join(workspaceDir, "assets", "asset-1.blend"), []byte("BLENDER DEV PLACEHOLDER"), 0644)
+	return workspaceDir
+}
+
+func buildPipelineRunner(keyUser llm_gateway.KeyUser) *pipeline.Runner {
+	workspaceDir := getWorkspaceDir()
 
 	blenderBin := os.Getenv("BLENDER_BINARY")
 	if blenderBin == "" {

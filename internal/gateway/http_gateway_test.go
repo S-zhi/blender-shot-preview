@@ -7,6 +7,8 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 
 	handlerv0_1 "github.com/S-zhi/blender-shot-preview/internal/handler/v0_1"
@@ -29,30 +31,7 @@ func TestHTTPGateway_Routes(t *testing.T) {
 		t.Errorf("expected 200 from /health, got %d", wHealth.Code)
 	}
 
-	// 2. Test GET /api/v0_1/assets
-	reqList := httptest.NewRequest(http.MethodGet, "/api/v0_1/assets?user_id=default_user_001", nil)
-	wList := httptest.NewRecorder()
-	gw.ServeHTTP(wList, reqList)
-	if wList.Code != http.StatusOK {
-		t.Errorf("expected 200 from /api/v0_1/assets, got %d: %s", wList.Code, wList.Body.String())
-	}
-	var listRes api.ListAssetsResponse
-	if err := json.Unmarshal(wList.Body.Bytes(), &listRes); err != nil {
-		t.Fatalf("failed to parse list response: %v", err)
-	}
-	if len(listRes.Assets) == 0 {
-		t.Errorf("expected seeded assets from gateway list")
-	}
-
-	// 3. Test GET /api/v0_1/assets/stats
-	reqStats := httptest.NewRequest(http.MethodGet, "/api/v0_1/assets/stats?user_id=default_user_001", nil)
-	wStats := httptest.NewRecorder()
-	gw.ServeHTTP(wStats, reqStats)
-	if wStats.Code != http.StatusOK {
-		t.Errorf("expected 200 from /api/v0_1/assets/stats, got %d", wStats.Code)
-	}
-
-	// 4. Test POST /api/v0_1/assets
+	// 2. Test POST /api/v0_1/assets (Register asset first)
 	newAsset := api.RegisterAssetRequest{
 		UserId:        "default_user_001",
 		Name:          "http_test_model.blend",
@@ -69,20 +48,43 @@ func TestHTTPGateway_Routes(t *testing.T) {
 		t.Errorf("expected 200 from POST /api/v0_1/assets, got %d: %s", wPost.Code, wPost.Body.String())
 	}
 
+	// 3. Test GET /api/v0_1/assets (Verify registered asset is returned)
+	reqList := httptest.NewRequest(http.MethodGet, "/api/v0_1/assets?user_id=default_user_001", nil)
+	wList := httptest.NewRecorder()
+	gw.ServeHTTP(wList, reqList)
+	if wList.Code != http.StatusOK {
+		t.Errorf("expected 200 from /api/v0_1/assets, got %d: %s", wList.Code, wList.Body.String())
+	}
+	var listRes api.ListAssetsResponse
+	if err := json.Unmarshal(wList.Body.Bytes(), &listRes); err != nil {
+		t.Fatalf("failed to parse list response: %v", err)
+	}
+	if len(listRes.Assets) != 1 || listRes.Assets[0].Name != "http_test_model.blend" {
+		t.Errorf("expected 1 registered asset from gateway list, got %d", len(listRes.Assets))
+	}
+
+	// 4. Test GET /api/v0_1/assets/stats
+	reqStats := httptest.NewRequest(http.MethodGet, "/api/v0_1/assets/stats?user_id=default_user_001", nil)
+	wStats := httptest.NewRecorder()
+	gw.ServeHTTP(wStats, reqStats)
+	if wStats.Code != http.StatusOK {
+		t.Errorf("expected 200 from /api/v0_1/assets/stats, got %d", wStats.Code)
+	}
+
 	// 5. Test POST /api/v0_1/assets/upload (multipart .blend upload)
 	var b bytes.Buffer
-	w := multipart.NewWriter(&b)
-	part, err := w.CreateFormFile("file", "heroine_alita_rigged.blend")
+	wUploadWriter := multipart.NewWriter(&b)
+	part, err := wUploadWriter.CreateFormFile("file", "heroine_alita_rigged.blend")
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, _ = part.Write([]byte("BLENDER_v401\x00Armature_Rigify\x00Bone_head\x00"))
-	_ = w.WriteField("user_id", "default_user_001")
-	_ = w.WriteField("name", "heroine_alita_rigged.blend")
-	_ = w.Close()
+	_ = wUploadWriter.WriteField("user_id", "default_user_001")
+	_ = wUploadWriter.WriteField("name", "heroine_alita_rigged.blend")
+	_ = wUploadWriter.Close()
 
 	reqUpload := httptest.NewRequest(http.MethodPost, "/api/v0_1/assets/upload", &b)
-	reqUpload.Header.Set("Content-Type", w.FormDataContentType())
+	reqUpload.Header.Set("Content-Type", wUploadWriter.FormDataContentType())
 	wUpload := httptest.NewRecorder()
 	gw.ServeHTTP(wUpload, reqUpload)
 	if wUpload.Code != http.StatusOK {
@@ -213,6 +215,78 @@ func TestHTTPGateway_StreamAndConfirm(t *testing.T) {
 	gw.ServeHTTP(wAdjust, reqAdjust)
 	if wAdjust.Code != http.StatusOK {
 		t.Fatalf("expected 200 from adjust, got %d: %s", wAdjust.Code, wAdjust.Body.String())
+	}
+}
+
+func TestHTTPGateway_AssetUpload(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "http-gateway-upload-test-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	metaFile := filepath.Join(tempDir, "metadata.json")
+	store, err := service.NewFileAssetStore(metaFile)
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+	assetHandler := handlerv0_1.NewAssetHandler(service.NewAssetService(store))
+	gw := NewHTTPGateway(nil, nil, assetHandler)
+	gw.SetAssetsDir(tempDir)
+
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+
+	part, err := writer.CreateFormFile("file", "scene_drag_drop.blend")
+	if err != nil {
+		t.Fatalf("failed to create form file: %v", err)
+	}
+	fileContent := []byte("BLENDER_SCENE_MOCK_BINARY_DATA")
+	if _, err := part.Write(fileContent); err != nil {
+		t.Fatalf("failed to write content: %v", err)
+	}
+	_ = writer.WriteField("user_id", "default_user_001")
+	_ = writer.WriteField("description", "拖拽上传测试工程")
+	_ = writer.WriteField("tags", "拖拽,测试")
+	_ = writer.Close()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v0_1/assets/upload", body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	w := httptest.NewRecorder()
+
+	gw.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 from upload, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var res api.RegisterAssetResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &res); err != nil {
+		t.Fatalf("failed to decode upload response: %v", err)
+	}
+	if res.AssetId == "" {
+		t.Fatalf("expected non-empty asset ID")
+	}
+
+	// Verify physical file was created in tempDir
+	targetFile := filepath.Join(tempDir, "scene_drag_drop.blend")
+	savedContent, err := os.ReadFile(targetFile)
+	if err != nil {
+		t.Fatalf("expected target file %s to exist on disk: %v", targetFile, err)
+	}
+	if string(savedContent) != string(fileContent) {
+		t.Errorf("saved content mismatch, got %s", string(savedContent))
+	}
+
+	// Verify asset is indexed in store
+	record, ok, err := store.Get(context.Background(), "default_user_001", res.AssetId)
+	if err != nil || !ok {
+		t.Fatalf("expected asset %s in store: %v", res.AssetId, err)
+	}
+	if record.Name != "scene_drag_drop.blend" || record.FileSizeBytes != int64(len(fileContent)) {
+		t.Errorf("unexpected record attributes: %+v", record)
+	}
+	if record.AssetType != api.AssetType_MODEL_3D {
+		t.Errorf("expected MODEL_3D, got %v", record.AssetType)
 	}
 }
 

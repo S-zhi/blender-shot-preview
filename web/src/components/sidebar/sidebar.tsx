@@ -253,13 +253,14 @@ export const Sidebar: React.FC = () => {
       <div className="h-12 px-3 border-t border-[#161920] flex items-center justify-between bg-[#0a0c0f]">
         <button
           onClick={() => setActiveView("settings")}
+          title="点击进入个人设置"
           className="flex items-center gap-2 hover:bg-[#151921] px-2 py-1 rounded transition-colors text-xs text-white/90"
         >
           <span className="relative flex h-2 w-2">
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
             <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
           </span>
-          <span className="font-semibold">Bytedance</span>
+          <span className="font-semibold">个人设置</span>
         </button>
 
         <button

@@ -21,6 +21,7 @@ type HTTPGateway struct {
 	shotHandler  *handlerv0_1.ShotPreviewHandler
 	keyHandler   *handlerv0_1.LLMKeyHandler
 	assetHandler *handlerv0_1.AssetHandler
+	assetsDir    string
 	mux          *http.ServeMux
 }
 
@@ -37,6 +38,11 @@ func NewHTTPGateway(
 	}
 	gw.routes()
 	return gw
+}
+
+// SetAssetsDir specifies the directory where uploaded asset files are saved.
+func (g *HTTPGateway) SetAssetsDir(dir string) {
+	g.assetsDir = dir
 }
 
 func (g *HTTPGateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -253,8 +259,8 @@ func (g *HTTPGateway) handleAssetUpload(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// 128 MB max upload
-	if err := r.ParseMultipartForm(128 << 20); err != nil {
+	// 500 MB max upload for 3D files
+	if err := r.ParseMultipartForm(500 << 20); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "failed to parse multipart form: " + err.Error()})
 		return
 	}
@@ -266,46 +272,105 @@ func (g *HTTPGateway) handleAssetUpload(w http.ResponseWriter, r *http.Request) 
 	}
 	defer file.Close()
 
-	userID := r.FormValue("user_id")
-	if strings.TrimSpace(userID) == "" {
+	userID := strings.TrimSpace(r.FormValue("user_id"))
+	if userID == "" {
 		userID = "default_user_001"
 	}
 
 	assetName := strings.TrimSpace(r.FormValue("name"))
 	if assetName == "" {
-		assetName = header.Filename
+		assetName = filepath.Base(header.Filename)
 	}
 
-	// Prepare storage directory
-	uploadDir := filepath.Join("data", "assets", "uploads")
-	_ = os.MkdirAll(uploadDir, 0755)
+	assetsDir := g.assetsDir
+	if assetsDir == "" {
+		workspaceDir := os.Getenv("BLENDER_WORKSPACE")
+		if workspaceDir == "" {
+			workspaceDir = filepath.Join(os.TempDir(), "blender-shot-preview")
+		}
+		assetsDir = filepath.Join(workspaceDir, "assets")
+	}
+	_ = os.MkdirAll(assetsDir, 0755)
 
-	targetFilename := fmt.Sprintf("%d_%s", time.Now().UnixNano(), filepath.Base(header.Filename))
-	targetPath := filepath.Join(uploadDir, targetFilename)
+	safeName := filepath.Base(header.Filename)
+	if safeName == "" || safeName == "." {
+		safeName = fmt.Sprintf("asset_%d.bin", time.Now().UnixNano())
+	}
+	targetPath := filepath.Join(assetsDir, safeName)
 
 	dst, err := os.Create(targetPath)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save file: " + err.Error()})
 		return
 	}
-	defer dst.Close()
-
 	written, err := io.Copy(dst, file)
+	dst.Close()
 	if err != nil {
+		_ = os.Remove(targetPath)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to write file content: " + err.Error()})
 		return
 	}
 
-	// Run automatic Blender inspection & character feature extraction
-	regReq, spec, err := service.InspectAndBuildRegisterRequest(userID, assetName, targetPath, written)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to analyze asset: " + err.Error()})
-		return
+	ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(safeName), "."))
+	if ext == "" {
+		ext = "bin"
 	}
 
 	if g.assetHandler == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "asset handler unavailable"})
 		return
+	}
+
+	var regReq *api.RegisterAssetRequest
+	var spec *service.CharacterSpec
+
+	if ext == "blend" {
+		// Run automatic Blender inspection & character feature extraction
+		rReq, s, err := service.InspectAndBuildRegisterRequest(userID, assetName, targetPath, written)
+		if err == nil && rReq != nil {
+			regReq = rReq
+			spec = s
+		}
+	}
+
+	if regReq == nil {
+		assetType := inferAssetType(ext)
+		if typeStr := r.FormValue("asset_type"); typeStr != "" {
+			if val, err := strconv.Atoi(typeStr); err == nil && val > 0 {
+				assetType = api.AssetType(val)
+			}
+		}
+
+		desc := r.FormValue("description")
+		if desc == "" {
+			desc = fmt.Sprintf("拖拽上传资产: %s (%s)", safeName, formatFileSize(written))
+		}
+
+		var tags []string
+		if tagsStr := r.FormValue("tags"); tagsStr != "" {
+			if err := json.Unmarshal([]byte(tagsStr), &tags); err != nil {
+				for _, t := range strings.Split(tagsStr, ",") {
+					t = strings.TrimSpace(t)
+					if t != "" {
+						tags = append(tags, t)
+					}
+				}
+			}
+		}
+		if len(tags) == 0 {
+			tags = []string{"拖拽导入", ext}
+		}
+
+		regReq = &api.RegisterAssetRequest{
+			UserId:        userID,
+			Name:          assetName,
+			AssetType:     assetType,
+			FileFormat:    ext,
+			FileSizeBytes: written,
+			StorageUri:    fmt.Sprintf("blender://assets/%s", safeName),
+			Description:   &desc,
+			Tags:          tags,
+		}
 	}
 
 	res, err := g.assetHandler.RegisterAsset(r.Context(), regReq)
@@ -314,7 +379,6 @@ func (g *HTTPGateway) handleAssetUpload(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Return registered view along with extracted character specs
 	responsePayload := map[string]any{
 		"asset_id":       res.AssetId,
 		"name":           regReq.Name,
@@ -324,7 +388,6 @@ func (g *HTTPGateway) handleAssetUpload(w http.ResponseWriter, r *http.Request) 
 		"character_spec": spec,
 		"status":         res.Status,
 	}
-
 	writeJSON(w, http.StatusOK, responsePayload)
 }
 
@@ -344,6 +407,31 @@ func (g *HTTPGateway) handleAssetStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, res)
+}
+
+func inferAssetType(ext string) api.AssetType {
+	switch strings.ToLower(ext) {
+	case "blend", "fbx", "obj", "gltf", "glb", "dae", "usd", "usda", "usdc", "usdz":
+		return api.AssetType_MODEL_3D
+	case "json", "py":
+		return api.AssetType_SHOT_PRESET
+	case "png", "jpg", "jpeg", "hdr", "exr", "tif", "tiff", "tga":
+		return api.AssetType_MATERIAL
+	case "abc", "bvh":
+		return api.AssetType_ANIMATION
+	default:
+		return api.AssetType_MODEL_3D
+	}
+}
+
+func formatFileSize(bytes int64) string {
+	if bytes <= 0 {
+		return "0 B"
+	}
+	if bytes < 1024*1024 {
+		return fmt.Sprintf("%.1f KB", float64(bytes)/1024)
+	}
+	return fmt.Sprintf("%.1f MB", float64(bytes)/(1024*1024))
 }
 
 func (g *HTTPGateway) handleShotPreviewStream(w http.ResponseWriter, r *http.Request) {
