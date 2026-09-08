@@ -11,6 +11,7 @@ import (
 
 	handlerv0_1 "github.com/S-zhi/blender-shot-preview/internal/handler/v0_1"
 	"github.com/S-zhi/blender-shot-preview/internal/service"
+	"github.com/S-zhi/blender-shot-preview/internal/service/pipeline"
 	api "github.com/S-zhi/blender-shot-preview/kitex_gen/handler/v0_1"
 )
 
@@ -155,5 +156,63 @@ func (s *stubShotPreviewService) CancelTask(_ context.Context, _ service.CancelT
 }
 func (s *stubShotPreviewService) RetryTask(_ context.Context, _ service.RetryTaskRequest) (service.TaskView, error) {
 	return s.task, nil
+}
+func (s *stubShotPreviewService) ConfirmStep(_ context.Context, _ service.ConfirmStepRequest) error {
+	return nil
+}
+func (s *stubShotPreviewService) AdjustStep(_ context.Context, _ service.AdjustStepRequest) error {
+	return nil
+}
+func (s *stubShotPreviewService) SubscribeEvents(_ context.Context, _ string) (<-chan pipeline.PipelineEvent, func(), error) {
+	ch := make(chan pipeline.PipelineEvent, 1)
+	ch <- pipeline.PipelineEvent{
+		TaskID: "task-test-1",
+		Type:   pipeline.EventTaskSucceeded,
+		Status: string(service.TaskStatusSucceeded),
+	}
+	return ch, func() { close(ch) }, nil
+}
+
+func TestHTTPGateway_StreamAndConfirm(t *testing.T) {
+	stub := &stubShotPreviewService{
+		task: service.TaskView{
+			TaskID: "task-test-1",
+			Status: service.TaskStatusRunning,
+			Nodes: []service.NodeView{
+				{ID: "Intent", Status: service.NodeStatusWaitingConfirmation},
+			},
+		},
+	}
+	shotHandler := handlerv0_1.NewShotPreviewHandler(stub)
+	gw := NewHTTPGateway(shotHandler, nil, nil)
+
+	// Test GET /api/v0_1/shot-preview/task/stream
+	reqStream := httptest.NewRequest(http.MethodGet, "/api/v0_1/shot-preview/task/stream?task_id=task-test-1", nil)
+	wStream := httptest.NewRecorder()
+	gw.ServeHTTP(wStream, reqStream)
+	if wStream.Code != http.StatusOK {
+		t.Fatalf("expected 200 from stream, got %d: %s", wStream.Code, wStream.Body.String())
+	}
+	if !bytes.Contains(wStream.Body.Bytes(), []byte("task_snapshot")) {
+		t.Fatalf("expected task_snapshot event in stream body: %s", wStream.Body.String())
+	}
+
+	// Test POST /api/v0_1/shot-preview/task/node/confirm
+	confirmBody := []byte(`{"task_id":"task-test-1","node_id":"Intent"}`)
+	reqConfirm := httptest.NewRequest(http.MethodPost, "/api/v0_1/shot-preview/task/node/confirm", bytes.NewReader(confirmBody))
+	wConfirm := httptest.NewRecorder()
+	gw.ServeHTTP(wConfirm, reqConfirm)
+	if wConfirm.Code != http.StatusOK {
+		t.Fatalf("expected 200 from confirm, got %d: %s", wConfirm.Code, wConfirm.Body.String())
+	}
+
+	// Test POST /api/v0_1/shot-preview/task/node/adjust
+	adjustBody := []byte(`{"task_id":"task-test-1","node_id":"Intent","output_json":"{}"}`)
+	reqAdjust := httptest.NewRequest(http.MethodPost, "/api/v0_1/shot-preview/task/node/adjust", bytes.NewReader(adjustBody))
+	wAdjust := httptest.NewRecorder()
+	gw.ServeHTTP(wAdjust, reqAdjust)
+	if wAdjust.Code != http.StatusOK {
+		t.Fatalf("expected 200 from adjust, got %d: %s", wAdjust.Code, wAdjust.Body.String())
+	}
 }
 
