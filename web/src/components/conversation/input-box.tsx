@@ -70,8 +70,8 @@ export const InputBox: React.FC<InputBoxProps> = ({
   };
 
   const currentProvider = providers.find((p) => p.id === selectedProviderId);
-  // Providers that have been saved to the backend (have a key_id)
-  const savedProviders = providers.filter((p) => p.savedKeyId);
+  // Providers that have been configured (have an apiKey or savedKeyId)
+  const savedProviders = providers.filter((p) => p.apiKey || p.savedKeyId);
   const hasSavedProviders = savedProviders.length > 0;
 
   return (
