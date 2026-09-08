@@ -192,15 +192,15 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
 
     try {
       // 1. Call ShotPreviewService (RPC Task creation)
-      // Read the active provider from settings so user_id and key_id align with
-      // the credential that was saved via the LLM Key RPC.
-      const { userId: settingsUserId, providers, selectedProviderId } = useSettingsStore.getState();
-      const activeProvider = providers.find((p) => p.id === selectedProviderId);
+      // Read the active provider from settings and ensure its key is synchronized to backend
+      const { userId: settingsUserId, ensureActiveProviderKey } = useSettingsStore.getState();
+      const effectiveKeyId = await ensureActiveProviderKey();
+      const effectiveUserId = settingsUserId || "default_user_001";
       const taskRes = await ShotPreviewService.createShotPreviewTask({
-        user_id: settingsUserId,
+        user_id: effectiveUserId,
         prompt,
         conversation_id: convId,
-        key_id: activeProvider?.savedKeyId ?? "",
+        key_id: effectiveKeyId ?? "",
       });
       if (!taskRes.task_id || taskRes.status === TaskStatus.REJECTED) {
         throw new Error("LLM / 后端拒绝创建分镜任务");
