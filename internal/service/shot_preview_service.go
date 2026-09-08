@@ -148,8 +148,12 @@ func taskView(task pipeline.Task) TaskView {
 			FinishedAt: cloneTime(node.FinishedAt),
 		}
 		if node.Status == pipeline.NodeStatusFailed {
+			msg := strings.TrimSpace(node.Error)
+			if msg == "" {
+				msg = "Production step failed"
+			}
 			nodeView.Failure = &FailureView{
-				Code: "NODE_FAILED", Message: "Production step failed", Retryable: true,
+				Code: "NODE_FAILED", Message: msg, Retryable: true,
 			}
 			if view.Failure == nil {
 				view.Failure = nodeView.Failure

@@ -67,11 +67,47 @@ func (g *HTTPGateway) handleHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 func (g *HTTPGateway) handleShotPreviewTask(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+	if r.Method == http.MethodGet {
+		g.getShotPreviewTask(w, r)
+		return
+	}
+	if r.Method == http.MethodPost {
+		g.createShotPreviewTask(w, r)
+		return
+	}
+	http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+}
+
+func (g *HTTPGateway) getShotPreviewTask(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	taskID := q.Get("task_id")
+	if taskID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "task_id is required"})
+		return
+	}
+	userID := q.Get("user_id")
+	if userID == "" {
+		userID = "default_user_001"
+	}
+
+	if g.shotHandler == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "shot preview service unavailable"})
 		return
 	}
 
+	req := api.GetShotPreviewTaskRequest{
+		UserId: userID,
+		TaskId: taskID,
+	}
+	res, err := g.shotHandler.GetShotPreviewTask(r.Context(), &req)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
+func (g *HTTPGateway) createShotPreviewTask(w http.ResponseWriter, r *http.Request) {
 	var req api.CreateShotPreviewTaskRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json body: " + err.Error()})
