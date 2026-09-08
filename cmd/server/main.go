@@ -126,6 +126,9 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	if !strings.EqualFold(strings.TrimSpace(os.Getenv("SHOT_PREVIEW_DEV_MODE")), "true") && strings.TrimSpace(os.Getenv("LLM_API_KEY")) == "" {
+		log.Fatal("LLM_API_KEY must be set when SHOT_PREVIEW_DEV_MODE is not true")
+	}
 	keyManager, err := llm_gateway.NewGateway(&inMemoryCredentialStore{credentials: make(map[string]llm_gateway.CredentialRecord)}, cipher)
 	if err != nil {
 		log.Fatal(err)
@@ -289,6 +292,21 @@ func buildPipelineRuntime(keyUser llm_gateway.KeyUser) (*pipelineRuntime, error)
 	modelResolver := agent.NewStaticModelResolver(map[string]model.BaseChatModel{
 		agent.ProductionModelProfile: &devChatModel{},
 	})
+	devMode := strings.EqualFold(strings.TrimSpace(os.Getenv("SHOT_PREVIEW_DEV_MODE")), "true")
+	var fixedModel model.BaseChatModel
+	if !devMode {
+		apiKey := strings.TrimSpace(os.Getenv("LLM_API_KEY"))
+		if apiKey != "" {
+			baseURL := strings.TrimSpace(os.Getenv("LLM_BASE_URL"))
+			if baseURL == "" {
+				baseURL = "https://api.openai.com/v1"
+			}
+			modelName := strings.TrimSpace(os.Getenv("LLM_MODEL"))
+			fixedModel = agent.NewOpenAICompatibleChatModel(agent.OpenAIModelConfig{
+				BaseURL: baseURL, APIKey: apiKey, ModelName: modelName,
+			})
+		}
+	}
 	factory, err := agent.NewEinoAgentFactory(modelResolver, skillRegistry)
 	if err != nil {
 		db.Close()
@@ -320,14 +338,17 @@ func buildPipelineRuntime(keyUser llm_gateway.KeyUser) (*pipelineRuntime, error)
 		db.Close()
 		return nil, err
 	}
-	devMode := strings.EqualFold(strings.TrimSpace(os.Getenv("SHOT_PREVIEW_DEV_MODE")), "true")
 	var runner *pipeline.Runner
 	if devMode {
 		// Development mode is explicit and intentionally bypasses credential
 		// resolution so the deterministic devChatModel remains usable in tests.
 		runner = pipeline.NewShotPreviewRunner(repo, agentSvc, skillRegistry)
 	} else {
-		runner = pipeline.NewShotPreviewRunnerWithKeys(repo, agentSvc, skillRegistry, keyUser)
+		if fixedModel != nil {
+			runner = pipeline.NewShotPreviewRunnerWithModel(repo, agentSvc, skillRegistry, fixedModel)
+		} else {
+			runner = pipeline.NewShotPreviewRunnerWithKeys(repo, agentSvc, skillRegistry, keyUser)
+		}
 	}
 	if err := runner.Recover(context.Background()); err != nil {
 		db.Close()

@@ -12,6 +12,7 @@ import (
 	"github.com/S-zhi/blender-shot-preview/internal/agent"
 	llmgateway "github.com/S-zhi/blender-shot-preview/internal/agent/llm_gateway"
 	"github.com/S-zhi/blender-shot-preview/internal/productiontools"
+	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/components/tool"
 )
 
@@ -20,6 +21,7 @@ import (
 type AgentServiceInvoker struct {
 	Service    agent.AgentService
 	Keys       llmgateway.KeyUser
+	Model      model.BaseChatModel
 	RequireLLM bool
 }
 
@@ -34,8 +36,23 @@ func NewShotPreviewRunnerWithKeys(repository Repository, agents agent.AgentServi
 	return newShotPreviewRunner(repository, agents, skills, keys, true)
 }
 
+// NewShotPreviewRunnerWithModel binds one server-configured model to every
+// static agent and does not depend on request-supplied credentials.
+func NewShotPreviewRunnerWithModel(repository Repository, agents agent.AgentService, skills agent.SkillRegistry, chatModel model.BaseChatModel) *Runner {
+	return newShotPreviewRunnerWithModel(repository, agents, skills, chatModel)
+}
+
 func newShotPreviewRunner(repository Repository, agents agent.AgentService, skills agent.SkillRegistry, keys llmgateway.KeyUser, requireLLM bool) *Runner {
 	agentInvoker := AgentServiceInvoker{Service: agents, Keys: keys, RequireLLM: requireLLM}
+	return newRunnerWithInvoker(repository, agents, skills, agentInvoker)
+}
+
+func newShotPreviewRunnerWithModel(repository Repository, agents agent.AgentService, skills agent.SkillRegistry, chatModel model.BaseChatModel) *Runner {
+	agentInvoker := AgentServiceInvoker{Service: agents, Model: chatModel, RequireLLM: true}
+	return newRunnerWithInvoker(repository, agents, skills, agentInvoker)
+}
+
+func newRunnerWithInvoker(repository Repository, agents agent.AgentService, skills agent.SkillRegistry, agentInvoker AgentServiceInvoker) *Runner {
 	return NewRunner(
 		repository,
 		agentInvoker,
@@ -57,8 +74,13 @@ func (i AgentServiceInvoker) InvokeAgent(ctx context.Context, request AgentReque
 		AgentID: request.AgentID, SessionID: request.TaskID, Input: string(input),
 		UserID: identity.UserID, TenantID: identity.UserID,
 	}
+	// Production uses one server-configured OpenAI-compatible model for every
+	// static agent. Request-scoped key/provider routing is only the legacy path.
+	if i.Model != nil {
+		agentReq.Model = i.Model
+	}
 
-	if i.RequireLLM {
+	if i.Model == nil && i.RequireLLM {
 		if i.Keys == nil {
 			return nil, &agent.LLMError{Code: agent.LLMNotConfigured, Cause: errors.New("no LLM credential provider configured")}
 		}
@@ -77,7 +99,7 @@ func (i AgentServiceInvoker) InvokeAgent(ctx context.Context, request AgentReque
 			return nil, &agent.LLMError{Code: agent.LLMNotConfigured, Cause: errors.New("resolved LLM credential has no API key")}
 		}
 		agentReq.Model = agent.NewChatModelFromKey(usableKey, "")
-	} else if i.Keys != nil && identity.UserID != "" {
+	} else if i.Model == nil && i.Keys != nil && identity.UserID != "" {
 		if usableKey, err := i.Keys.Use(ctx, identity.KeyID, identity.UserID); err == nil && usableKey.APIKey != "" {
 			agentReq.Model = agent.NewChatModelFromKey(usableKey, "")
 		}
