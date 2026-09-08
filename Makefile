@@ -31,10 +31,10 @@ check-env:
 	@export PATH="$(NODE_BIN_PATH):$(PATH)"; \
 	which node >/dev/null 2>&1 || (echo "[错误] 未检测到 Node.js，请先安装 Node.js (推荐 v18+)" && exit 1); \
 	which npm >/dev/null 2>&1 || (echo "[错误] 未检测到 npm，请先安装 npm" && exit 1)
-	@if [ ! -d "web/node_modules" ]; then \
-		echo "==> 未检测到前端 node_modules，正在自动执行 npm install..."; \
+	@if [ ! -d "web/node_modules" ] || [ ! -d "web/node_modules/three" ] || [ "web/package.json" -nt "web/node_modules" ]; then \
+		echo "==> 检测到前端依赖缺失或 package.json 已更新，正在自动执行 npm install..."; \
 		export PATH="$(NODE_BIN_PATH):$(PATH)"; \
-		cd web && npm install; \
+		cd web && npm install && touch node_modules; \
 	else \
 		echo "==> 前端依赖完整 (web/node_modules 已就绪)"; \
 	fi
