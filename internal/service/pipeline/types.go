@@ -271,6 +271,7 @@ type AgentRequest struct {
 	NodeID       NodeID
 	AgentID      string
 	Attempt      int
+	TaskInput    Snapshot
 	Input        Snapshot
 	Dependencies DependencyOutputs
 }
@@ -280,6 +281,7 @@ type StepRequest struct {
 	NodeID       NodeID
 	Step         string
 	Attempt      int
+	TaskInput    Snapshot
 	Input        Snapshot
 	Dependencies DependencyOutputs
 }
@@ -289,6 +291,7 @@ type ToolRequest struct {
 	NodeID       NodeID
 	Tool         string
 	Attempt      int
+	TaskInput    Snapshot
 	Input        Snapshot
 	Dependencies DependencyOutputs
 }

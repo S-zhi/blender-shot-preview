@@ -1,1 +1,50 @@
-{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"https://github.com/S-zhi/blender-shot-preview/contracts/agents/v1/asset-task.schema.json","title":"Asset Task v1","type":"object","additionalProperties":false,"required":["version","task_id","asset_id","asset_kind","description","workspace","output_path"],"properties":{"version":{"type":"string","const":"asset-task/v1"},"task_id":{"type":"string","minLength":1},"asset_id":{"type":"string","minLength":1},"asset_kind":{"type":"string"},"description":{"type":"string"},"workspace":{"type":"string","minLength":1},"output_path":{"type":"string","minLength":1},"depends_on":{"type":"array","items":{"type":"string"}}}}
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/S-zhi/blender-shot-preview/contracts/agents/v1/asset-task.schema.json",
+  "title": "Asset Task v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "task_id",
+    "asset_id",
+    "asset_kind",
+    "description",
+    "workspace",
+    "output_path"
+  ],
+  "properties": {
+    "version": {
+      "type": "string",
+      "const": "asset-task/v1"
+    },
+    "task_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "asset_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "asset_kind": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "workspace": {
+      "type": "string",
+      "minLength": 1
+    },
+    "output_path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "depends_on": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}

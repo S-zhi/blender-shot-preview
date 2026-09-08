@@ -389,17 +389,17 @@ func (r *Runner) invoke(ctx context.Context, task Task, node Node) (Snapshot, er
 		if r.agents == nil {
 			return Snapshot{}, fmt.Errorf("%w: agent %q", ErrMissingInvoker, node.Invocation.Target)
 		}
-		output, err = r.agents.InvokeAgent(ctx, AgentRequest{TaskID: task.ID, NodeID: node.ID, AgentID: node.Invocation.Target, Attempt: node.Attempts, Input: cloneSnapshot(node.Input), Dependencies: dependencies})
+		output, err = r.agents.InvokeAgent(ctx, AgentRequest{TaskID: task.ID, NodeID: node.ID, AgentID: node.Invocation.Target, Attempt: node.Attempts, TaskInput: cloneSnapshot(task.Input), Input: cloneSnapshot(node.Input), Dependencies: dependencies})
 	case InvocationStep:
 		if r.steps == nil {
 			return Snapshot{}, fmt.Errorf("%w: step %q", ErrMissingInvoker, node.Invocation.Target)
 		}
-		output, err = r.steps.InvokeStep(ctx, StepRequest{TaskID: task.ID, NodeID: node.ID, Step: node.Invocation.Target, Attempt: node.Attempts, Input: cloneSnapshot(node.Input), Dependencies: dependencies})
+		output, err = r.steps.InvokeStep(ctx, StepRequest{TaskID: task.ID, NodeID: node.ID, Step: node.Invocation.Target, Attempt: node.Attempts, TaskInput: cloneSnapshot(task.Input), Input: cloneSnapshot(node.Input), Dependencies: dependencies})
 	case InvocationTool:
 		if r.tools == nil {
 			return Snapshot{}, fmt.Errorf("%w: tool %q", ErrMissingInvoker, node.Invocation.Target)
 		}
-		output, err = r.tools.InvokeTool(ctx, ToolRequest{TaskID: task.ID, NodeID: node.ID, Tool: node.Invocation.Target, Attempt: node.Attempts, Input: cloneSnapshot(node.Input), Dependencies: dependencies})
+		output, err = r.tools.InvokeTool(ctx, ToolRequest{TaskID: task.ID, NodeID: node.ID, Tool: node.Invocation.Target, Attempt: node.Attempts, TaskInput: cloneSnapshot(task.Input), Input: cloneSnapshot(node.Input), Dependencies: dependencies})
 	default:
 		return Snapshot{}, fmt.Errorf("%w: invocation kind %q", ErrInvalidWorkflow, node.Invocation.Kind)
 	}
