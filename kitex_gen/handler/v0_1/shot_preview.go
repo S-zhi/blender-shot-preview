@@ -51,11 +51,393 @@ func (p *TaskStatus) Value() (driver.Value, error) {
 	return int64(*p), nil
 }
 
+type ProductionTaskStatus int64
+
+const (
+	ProductionTaskStatus_PENDING   ProductionTaskStatus = 1
+	ProductionTaskStatus_RUNNING   ProductionTaskStatus = 2
+	ProductionTaskStatus_SUCCEEDED ProductionTaskStatus = 3
+	ProductionTaskStatus_FAILED    ProductionTaskStatus = 4
+	ProductionTaskStatus_CANCELLED ProductionTaskStatus = 5
+)
+
+func (p ProductionTaskStatus) String() string {
+	switch p {
+	case ProductionTaskStatus_PENDING:
+		return "PENDING"
+	case ProductionTaskStatus_RUNNING:
+		return "RUNNING"
+	case ProductionTaskStatus_SUCCEEDED:
+		return "SUCCEEDED"
+	case ProductionTaskStatus_FAILED:
+		return "FAILED"
+	case ProductionTaskStatus_CANCELLED:
+		return "CANCELLED"
+	}
+	return "<UNSET>"
+}
+
+func ProductionTaskStatusFromString(s string) (ProductionTaskStatus, error) {
+	switch s {
+	case "PENDING":
+		return ProductionTaskStatus_PENDING, nil
+	case "RUNNING":
+		return ProductionTaskStatus_RUNNING, nil
+	case "SUCCEEDED":
+		return ProductionTaskStatus_SUCCEEDED, nil
+	case "FAILED":
+		return ProductionTaskStatus_FAILED, nil
+	case "CANCELLED":
+		return ProductionTaskStatus_CANCELLED, nil
+	}
+	return ProductionTaskStatus(0), fmt.Errorf("not a valid ProductionTaskStatus string")
+}
+
+func ProductionTaskStatusPtr(v ProductionTaskStatus) *ProductionTaskStatus { return &v }
+func (p *ProductionTaskStatus) Scan(value interface{}) (err error) {
+	var result sql.NullInt64
+	err = result.Scan(value)
+	*p = ProductionTaskStatus(result.Int64)
+	return
+}
+
+func (p *ProductionTaskStatus) Value() (driver.Value, error) {
+	if p == nil {
+		return nil, nil
+	}
+	return int64(*p), nil
+}
+
+type TaskFailure struct {
+	Code      string `thrift:"code,1,required" frugal:"1,required,string" json:"code"`
+	Message   string `thrift:"message,2,required" frugal:"2,required,string" json:"message"`
+	Retryable bool   `thrift:"retryable,3,required" frugal:"3,required,bool" json:"retryable"`
+}
+
+func NewTaskFailure() *TaskFailure {
+	return &TaskFailure{}
+}
+
+func (p *TaskFailure) InitDefault() {
+}
+
+func (p *TaskFailure) GetCode() (v string) {
+	return p.Code
+}
+
+func (p *TaskFailure) GetMessage() (v string) {
+	return p.Message
+}
+
+func (p *TaskFailure) GetRetryable() (v bool) {
+	return p.Retryable
+}
+func (p *TaskFailure) SetCode(val string) {
+	p.Code = val
+}
+func (p *TaskFailure) SetMessage(val string) {
+	p.Message = val
+}
+func (p *TaskFailure) SetRetryable(val bool) {
+	p.Retryable = val
+}
+
+func (p *TaskFailure) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("TaskFailure(%+v)", *p)
+}
+
+var fieldIDToName_TaskFailure = map[int16]string{
+	1: "code",
+	2: "message",
+	3: "retryable",
+}
+
+type TaskNodeView struct {
+	NodeId     string               `thrift:"node_id,1,required" frugal:"1,required,string" json:"node_id"`
+	Status     ProductionTaskStatus `thrift:"status,2,required" frugal:"2,required,ProductionTaskStatus" json:"status"`
+	Attempts   int32                `thrift:"attempts,3,required" frugal:"3,required,i32" json:"attempts"`
+	StartedAt  *string              `thrift:"started_at,4,optional" frugal:"4,optional,string" json:"started_at,omitempty"`
+	FinishedAt *string              `thrift:"finished_at,5,optional" frugal:"5,optional,string" json:"finished_at,omitempty"`
+	Failure    *TaskFailure         `thrift:"failure,6,optional" frugal:"6,optional,TaskFailure" json:"failure,omitempty"`
+}
+
+func NewTaskNodeView() *TaskNodeView {
+	return &TaskNodeView{}
+}
+
+func (p *TaskNodeView) InitDefault() {
+}
+
+func (p *TaskNodeView) GetNodeId() (v string) {
+	return p.NodeId
+}
+
+func (p *TaskNodeView) GetStatus() (v ProductionTaskStatus) {
+	return p.Status
+}
+
+func (p *TaskNodeView) GetAttempts() (v int32) {
+	return p.Attempts
+}
+
+var TaskNodeView_StartedAt_DEFAULT string
+
+func (p *TaskNodeView) GetStartedAt() (v string) {
+	if !p.IsSetStartedAt() {
+		return TaskNodeView_StartedAt_DEFAULT
+	}
+	return *p.StartedAt
+}
+
+var TaskNodeView_FinishedAt_DEFAULT string
+
+func (p *TaskNodeView) GetFinishedAt() (v string) {
+	if !p.IsSetFinishedAt() {
+		return TaskNodeView_FinishedAt_DEFAULT
+	}
+	return *p.FinishedAt
+}
+
+var TaskNodeView_Failure_DEFAULT *TaskFailure
+
+func (p *TaskNodeView) GetFailure() (v *TaskFailure) {
+	if !p.IsSetFailure() {
+		return TaskNodeView_Failure_DEFAULT
+	}
+	return p.Failure
+}
+func (p *TaskNodeView) SetNodeId(val string) {
+	p.NodeId = val
+}
+func (p *TaskNodeView) SetStatus(val ProductionTaskStatus) {
+	p.Status = val
+}
+func (p *TaskNodeView) SetAttempts(val int32) {
+	p.Attempts = val
+}
+func (p *TaskNodeView) SetStartedAt(val *string) {
+	p.StartedAt = val
+}
+func (p *TaskNodeView) SetFinishedAt(val *string) {
+	p.FinishedAt = val
+}
+func (p *TaskNodeView) SetFailure(val *TaskFailure) {
+	p.Failure = val
+}
+
+func (p *TaskNodeView) IsSetStartedAt() bool {
+	return p.StartedAt != nil
+}
+
+func (p *TaskNodeView) IsSetFinishedAt() bool {
+	return p.FinishedAt != nil
+}
+
+func (p *TaskNodeView) IsSetFailure() bool {
+	return p.Failure != nil
+}
+
+func (p *TaskNodeView) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("TaskNodeView(%+v)", *p)
+}
+
+var fieldIDToName_TaskNodeView = map[int16]string{
+	1: "node_id",
+	2: "status",
+	3: "attempts",
+	4: "started_at",
+	5: "finished_at",
+	6: "failure",
+}
+
+type TaskArtifactView struct {
+	Type string `thrift:"type,1,required" frugal:"1,required,string" json:"type"`
+	Uri  string `thrift:"uri,2,required" frugal:"2,required,string" json:"uri"`
+	Name string `thrift:"name,3,required" frugal:"3,required,string" json:"name"`
+}
+
+func NewTaskArtifactView() *TaskArtifactView {
+	return &TaskArtifactView{}
+}
+
+func (p *TaskArtifactView) InitDefault() {
+}
+
+func (p *TaskArtifactView) GetType() (v string) {
+	return p.Type
+}
+
+func (p *TaskArtifactView) GetUri() (v string) {
+	return p.Uri
+}
+
+func (p *TaskArtifactView) GetName() (v string) {
+	return p.Name
+}
+func (p *TaskArtifactView) SetType(val string) {
+	p.Type = val
+}
+func (p *TaskArtifactView) SetUri(val string) {
+	p.Uri = val
+}
+func (p *TaskArtifactView) SetName(val string) {
+	p.Name = val
+}
+
+func (p *TaskArtifactView) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("TaskArtifactView(%+v)", *p)
+}
+
+var fieldIDToName_TaskArtifactView = map[int16]string{
+	1: "type",
+	2: "uri",
+	3: "name",
+}
+
+type ShotPreviewTaskView struct {
+	TaskId          string               `thrift:"task_id,1,required" frugal:"1,required,string" json:"task_id"`
+	Status          ProductionTaskStatus `thrift:"status,2,required" frugal:"2,required,ProductionTaskStatus" json:"status"`
+	WorkflowId      string               `thrift:"workflow_id,3,required" frugal:"3,required,string" json:"workflow_id"`
+	WorkflowVersion string               `thrift:"workflow_version,4,required" frugal:"4,required,string" json:"workflow_version"`
+	Nodes           []*TaskNodeView      `thrift:"nodes,5,required" frugal:"5,required,list<TaskNodeView>" json:"nodes"`
+	Artifacts       []*TaskArtifactView  `thrift:"artifacts,6,required" frugal:"6,required,list<TaskArtifactView>" json:"artifacts"`
+	Failure         *TaskFailure         `thrift:"failure,7,optional" frugal:"7,optional,TaskFailure" json:"failure,omitempty"`
+	CreatedAt       string               `thrift:"created_at,8,required" frugal:"8,required,string" json:"created_at"`
+	UpdatedAt       string               `thrift:"updated_at,9,required" frugal:"9,required,string" json:"updated_at"`
+	FinishedAt      *string              `thrift:"finished_at,10,optional" frugal:"10,optional,string" json:"finished_at,omitempty"`
+}
+
+func NewShotPreviewTaskView() *ShotPreviewTaskView {
+	return &ShotPreviewTaskView{}
+}
+
+func (p *ShotPreviewTaskView) InitDefault() {
+}
+
+func (p *ShotPreviewTaskView) GetTaskId() (v string) {
+	return p.TaskId
+}
+
+func (p *ShotPreviewTaskView) GetStatus() (v ProductionTaskStatus) {
+	return p.Status
+}
+
+func (p *ShotPreviewTaskView) GetWorkflowId() (v string) {
+	return p.WorkflowId
+}
+
+func (p *ShotPreviewTaskView) GetWorkflowVersion() (v string) {
+	return p.WorkflowVersion
+}
+
+func (p *ShotPreviewTaskView) GetNodes() (v []*TaskNodeView) {
+	return p.Nodes
+}
+
+func (p *ShotPreviewTaskView) GetArtifacts() (v []*TaskArtifactView) {
+	return p.Artifacts
+}
+
+var ShotPreviewTaskView_Failure_DEFAULT *TaskFailure
+
+func (p *ShotPreviewTaskView) GetFailure() (v *TaskFailure) {
+	if !p.IsSetFailure() {
+		return ShotPreviewTaskView_Failure_DEFAULT
+	}
+	return p.Failure
+}
+
+func (p *ShotPreviewTaskView) GetCreatedAt() (v string) {
+	return p.CreatedAt
+}
+
+func (p *ShotPreviewTaskView) GetUpdatedAt() (v string) {
+	return p.UpdatedAt
+}
+
+var ShotPreviewTaskView_FinishedAt_DEFAULT string
+
+func (p *ShotPreviewTaskView) GetFinishedAt() (v string) {
+	if !p.IsSetFinishedAt() {
+		return ShotPreviewTaskView_FinishedAt_DEFAULT
+	}
+	return *p.FinishedAt
+}
+func (p *ShotPreviewTaskView) SetTaskId(val string) {
+	p.TaskId = val
+}
+func (p *ShotPreviewTaskView) SetStatus(val ProductionTaskStatus) {
+	p.Status = val
+}
+func (p *ShotPreviewTaskView) SetWorkflowId(val string) {
+	p.WorkflowId = val
+}
+func (p *ShotPreviewTaskView) SetWorkflowVersion(val string) {
+	p.WorkflowVersion = val
+}
+func (p *ShotPreviewTaskView) SetNodes(val []*TaskNodeView) {
+	p.Nodes = val
+}
+func (p *ShotPreviewTaskView) SetArtifacts(val []*TaskArtifactView) {
+	p.Artifacts = val
+}
+func (p *ShotPreviewTaskView) SetFailure(val *TaskFailure) {
+	p.Failure = val
+}
+func (p *ShotPreviewTaskView) SetCreatedAt(val string) {
+	p.CreatedAt = val
+}
+func (p *ShotPreviewTaskView) SetUpdatedAt(val string) {
+	p.UpdatedAt = val
+}
+func (p *ShotPreviewTaskView) SetFinishedAt(val *string) {
+	p.FinishedAt = val
+}
+
+func (p *ShotPreviewTaskView) IsSetFailure() bool {
+	return p.Failure != nil
+}
+
+func (p *ShotPreviewTaskView) IsSetFinishedAt() bool {
+	return p.FinishedAt != nil
+}
+
+func (p *ShotPreviewTaskView) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("ShotPreviewTaskView(%+v)", *p)
+}
+
+var fieldIDToName_ShotPreviewTaskView = map[int16]string{
+	1:  "task_id",
+	2:  "status",
+	3:  "workflow_id",
+	4:  "workflow_version",
+	5:  "nodes",
+	6:  "artifacts",
+	7:  "failure",
+	8:  "created_at",
+	9:  "updated_at",
+	10: "finished_at",
+}
+
 type CreateShotPreviewTaskRequest struct {
-	UserId         string  `thrift:"user_id,1,required" frugal:"1,required,string" json:"user_id"`
-	Prompt         string  `thrift:"prompt,2,required" frugal:"2,required,string" json:"prompt"`
-	ConversationId *string `thrift:"conversation_id,3,optional" frugal:"3,optional,string" json:"conversation_id,omitempty"`
-	RequestId      *string `thrift:"request_id,4,optional" frugal:"4,optional,string" json:"request_id,omitempty"`
+	UserId          string  `thrift:"user_id,1,required" frugal:"1,required,string" json:"user_id"`
+	Prompt          string  `thrift:"prompt,2,required" frugal:"2,required,string" json:"prompt"`
+	ConversationId  *string `thrift:"conversation_id,3,optional" frugal:"3,optional,string" json:"conversation_id,omitempty"`
+	RequestId       *string `thrift:"request_id,4,optional" frugal:"4,optional,string" json:"request_id,omitempty"`
+	WorkflowId      *string `thrift:"workflow_id,5,optional" frugal:"5,optional,string" json:"workflow_id,omitempty"`
+	WorkflowVersion *string `thrift:"workflow_version,6,optional" frugal:"6,optional,string" json:"workflow_version,omitempty"`
 }
 
 func NewCreateShotPreviewTaskRequest() *CreateShotPreviewTaskRequest {
@@ -90,6 +472,24 @@ func (p *CreateShotPreviewTaskRequest) GetRequestId() (v string) {
 	}
 	return *p.RequestId
 }
+
+var CreateShotPreviewTaskRequest_WorkflowId_DEFAULT string
+
+func (p *CreateShotPreviewTaskRequest) GetWorkflowId() (v string) {
+	if !p.IsSetWorkflowId() {
+		return CreateShotPreviewTaskRequest_WorkflowId_DEFAULT
+	}
+	return *p.WorkflowId
+}
+
+var CreateShotPreviewTaskRequest_WorkflowVersion_DEFAULT string
+
+func (p *CreateShotPreviewTaskRequest) GetWorkflowVersion() (v string) {
+	if !p.IsSetWorkflowVersion() {
+		return CreateShotPreviewTaskRequest_WorkflowVersion_DEFAULT
+	}
+	return *p.WorkflowVersion
+}
 func (p *CreateShotPreviewTaskRequest) SetUserId(val string) {
 	p.UserId = val
 }
@@ -102,6 +502,12 @@ func (p *CreateShotPreviewTaskRequest) SetConversationId(val *string) {
 func (p *CreateShotPreviewTaskRequest) SetRequestId(val *string) {
 	p.RequestId = val
 }
+func (p *CreateShotPreviewTaskRequest) SetWorkflowId(val *string) {
+	p.WorkflowId = val
+}
+func (p *CreateShotPreviewTaskRequest) SetWorkflowVersion(val *string) {
+	p.WorkflowVersion = val
+}
 
 func (p *CreateShotPreviewTaskRequest) IsSetConversationId() bool {
 	return p.ConversationId != nil
@@ -109,6 +515,14 @@ func (p *CreateShotPreviewTaskRequest) IsSetConversationId() bool {
 
 func (p *CreateShotPreviewTaskRequest) IsSetRequestId() bool {
 	return p.RequestId != nil
+}
+
+func (p *CreateShotPreviewTaskRequest) IsSetWorkflowId() bool {
+	return p.WorkflowId != nil
+}
+
+func (p *CreateShotPreviewTaskRequest) IsSetWorkflowVersion() bool {
+	return p.WorkflowVersion != nil
 }
 
 func (p *CreateShotPreviewTaskRequest) String() string {
@@ -123,12 +537,15 @@ var fieldIDToName_CreateShotPreviewTaskRequest = map[int16]string{
 	2: "prompt",
 	3: "conversation_id",
 	4: "request_id",
+	5: "workflow_id",
+	6: "workflow_version",
 }
 
 type CreateShotPreviewTaskResponse struct {
 	TaskId    string     `thrift:"task_id,1,required" frugal:"1,required,string" json:"task_id"`
 	Status    TaskStatus `thrift:"status,2,required" frugal:"2,required,TaskStatus" json:"status"`
 	RequestId *string    `thrift:"request_id,3,optional" frugal:"3,optional,string" json:"request_id,omitempty"`
+	Replayed  *bool      `thrift:"replayed,4,optional" frugal:"4,optional,bool" json:"replayed,omitempty"`
 }
 
 func NewCreateShotPreviewTaskResponse() *CreateShotPreviewTaskResponse {
@@ -154,6 +571,15 @@ func (p *CreateShotPreviewTaskResponse) GetRequestId() (v string) {
 	}
 	return *p.RequestId
 }
+
+var CreateShotPreviewTaskResponse_Replayed_DEFAULT bool
+
+func (p *CreateShotPreviewTaskResponse) GetReplayed() (v bool) {
+	if !p.IsSetReplayed() {
+		return CreateShotPreviewTaskResponse_Replayed_DEFAULT
+	}
+	return *p.Replayed
+}
 func (p *CreateShotPreviewTaskResponse) SetTaskId(val string) {
 	p.TaskId = val
 }
@@ -163,9 +589,16 @@ func (p *CreateShotPreviewTaskResponse) SetStatus(val TaskStatus) {
 func (p *CreateShotPreviewTaskResponse) SetRequestId(val *string) {
 	p.RequestId = val
 }
+func (p *CreateShotPreviewTaskResponse) SetReplayed(val *bool) {
+	p.Replayed = val
+}
 
 func (p *CreateShotPreviewTaskResponse) IsSetRequestId() bool {
 	return p.RequestId != nil
+}
+
+func (p *CreateShotPreviewTaskResponse) IsSetReplayed() bool {
+	return p.Replayed != nil
 }
 
 func (p *CreateShotPreviewTaskResponse) String() string {
@@ -179,10 +612,245 @@ var fieldIDToName_CreateShotPreviewTaskResponse = map[int16]string{
 	1: "task_id",
 	2: "status",
 	3: "request_id",
+	4: "replayed",
+}
+
+type GetShotPreviewTaskRequest struct {
+	UserId string `thrift:"user_id,1,required" frugal:"1,required,string" json:"user_id"`
+	TaskId string `thrift:"task_id,2,required" frugal:"2,required,string" json:"task_id"`
+}
+
+func NewGetShotPreviewTaskRequest() *GetShotPreviewTaskRequest {
+	return &GetShotPreviewTaskRequest{}
+}
+
+func (p *GetShotPreviewTaskRequest) InitDefault() {
+}
+
+func (p *GetShotPreviewTaskRequest) GetUserId() (v string) {
+	return p.UserId
+}
+
+func (p *GetShotPreviewTaskRequest) GetTaskId() (v string) {
+	return p.TaskId
+}
+func (p *GetShotPreviewTaskRequest) SetUserId(val string) {
+	p.UserId = val
+}
+func (p *GetShotPreviewTaskRequest) SetTaskId(val string) {
+	p.TaskId = val
+}
+
+func (p *GetShotPreviewTaskRequest) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("GetShotPreviewTaskRequest(%+v)", *p)
+}
+
+var fieldIDToName_GetShotPreviewTaskRequest = map[int16]string{
+	1: "user_id",
+	2: "task_id",
+}
+
+type GetShotPreviewTaskResponse struct {
+	Task *ShotPreviewTaskView `thrift:"task,1,required" frugal:"1,required,ShotPreviewTaskView" json:"task"`
+}
+
+func NewGetShotPreviewTaskResponse() *GetShotPreviewTaskResponse {
+	return &GetShotPreviewTaskResponse{}
+}
+
+func (p *GetShotPreviewTaskResponse) InitDefault() {
+}
+
+var GetShotPreviewTaskResponse_Task_DEFAULT *ShotPreviewTaskView
+
+func (p *GetShotPreviewTaskResponse) GetTask() (v *ShotPreviewTaskView) {
+	if !p.IsSetTask() {
+		return GetShotPreviewTaskResponse_Task_DEFAULT
+	}
+	return p.Task
+}
+func (p *GetShotPreviewTaskResponse) SetTask(val *ShotPreviewTaskView) {
+	p.Task = val
+}
+
+func (p *GetShotPreviewTaskResponse) IsSetTask() bool {
+	return p.Task != nil
+}
+
+func (p *GetShotPreviewTaskResponse) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("GetShotPreviewTaskResponse(%+v)", *p)
+}
+
+var fieldIDToName_GetShotPreviewTaskResponse = map[int16]string{
+	1: "task",
+}
+
+type CancelShotPreviewTaskRequest struct {
+	UserId string `thrift:"user_id,1,required" frugal:"1,required,string" json:"user_id"`
+	TaskId string `thrift:"task_id,2,required" frugal:"2,required,string" json:"task_id"`
+}
+
+func NewCancelShotPreviewTaskRequest() *CancelShotPreviewTaskRequest {
+	return &CancelShotPreviewTaskRequest{}
+}
+
+func (p *CancelShotPreviewTaskRequest) InitDefault() {
+}
+
+func (p *CancelShotPreviewTaskRequest) GetUserId() (v string) {
+	return p.UserId
+}
+
+func (p *CancelShotPreviewTaskRequest) GetTaskId() (v string) {
+	return p.TaskId
+}
+func (p *CancelShotPreviewTaskRequest) SetUserId(val string) {
+	p.UserId = val
+}
+func (p *CancelShotPreviewTaskRequest) SetTaskId(val string) {
+	p.TaskId = val
+}
+
+func (p *CancelShotPreviewTaskRequest) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("CancelShotPreviewTaskRequest(%+v)", *p)
+}
+
+var fieldIDToName_CancelShotPreviewTaskRequest = map[int16]string{
+	1: "user_id",
+	2: "task_id",
+}
+
+type CancelShotPreviewTaskResponse struct {
+	Task *ShotPreviewTaskView `thrift:"task,1,required" frugal:"1,required,ShotPreviewTaskView" json:"task"`
+}
+
+func NewCancelShotPreviewTaskResponse() *CancelShotPreviewTaskResponse {
+	return &CancelShotPreviewTaskResponse{}
+}
+
+func (p *CancelShotPreviewTaskResponse) InitDefault() {
+}
+
+var CancelShotPreviewTaskResponse_Task_DEFAULT *ShotPreviewTaskView
+
+func (p *CancelShotPreviewTaskResponse) GetTask() (v *ShotPreviewTaskView) {
+	if !p.IsSetTask() {
+		return CancelShotPreviewTaskResponse_Task_DEFAULT
+	}
+	return p.Task
+}
+func (p *CancelShotPreviewTaskResponse) SetTask(val *ShotPreviewTaskView) {
+	p.Task = val
+}
+
+func (p *CancelShotPreviewTaskResponse) IsSetTask() bool {
+	return p.Task != nil
+}
+
+func (p *CancelShotPreviewTaskResponse) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("CancelShotPreviewTaskResponse(%+v)", *p)
+}
+
+var fieldIDToName_CancelShotPreviewTaskResponse = map[int16]string{
+	1: "task",
+}
+
+type RetryShotPreviewTaskRequest struct {
+	UserId string `thrift:"user_id,1,required" frugal:"1,required,string" json:"user_id"`
+	TaskId string `thrift:"task_id,2,required" frugal:"2,required,string" json:"task_id"`
+}
+
+func NewRetryShotPreviewTaskRequest() *RetryShotPreviewTaskRequest {
+	return &RetryShotPreviewTaskRequest{}
+}
+
+func (p *RetryShotPreviewTaskRequest) InitDefault() {
+}
+
+func (p *RetryShotPreviewTaskRequest) GetUserId() (v string) {
+	return p.UserId
+}
+
+func (p *RetryShotPreviewTaskRequest) GetTaskId() (v string) {
+	return p.TaskId
+}
+func (p *RetryShotPreviewTaskRequest) SetUserId(val string) {
+	p.UserId = val
+}
+func (p *RetryShotPreviewTaskRequest) SetTaskId(val string) {
+	p.TaskId = val
+}
+
+func (p *RetryShotPreviewTaskRequest) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("RetryShotPreviewTaskRequest(%+v)", *p)
+}
+
+var fieldIDToName_RetryShotPreviewTaskRequest = map[int16]string{
+	1: "user_id",
+	2: "task_id",
+}
+
+type RetryShotPreviewTaskResponse struct {
+	Task *ShotPreviewTaskView `thrift:"task,1,required" frugal:"1,required,ShotPreviewTaskView" json:"task"`
+}
+
+func NewRetryShotPreviewTaskResponse() *RetryShotPreviewTaskResponse {
+	return &RetryShotPreviewTaskResponse{}
+}
+
+func (p *RetryShotPreviewTaskResponse) InitDefault() {
+}
+
+var RetryShotPreviewTaskResponse_Task_DEFAULT *ShotPreviewTaskView
+
+func (p *RetryShotPreviewTaskResponse) GetTask() (v *ShotPreviewTaskView) {
+	if !p.IsSetTask() {
+		return RetryShotPreviewTaskResponse_Task_DEFAULT
+	}
+	return p.Task
+}
+func (p *RetryShotPreviewTaskResponse) SetTask(val *ShotPreviewTaskView) {
+	p.Task = val
+}
+
+func (p *RetryShotPreviewTaskResponse) IsSetTask() bool {
+	return p.Task != nil
+}
+
+func (p *RetryShotPreviewTaskResponse) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("RetryShotPreviewTaskResponse(%+v)", *p)
+}
+
+var fieldIDToName_RetryShotPreviewTaskResponse = map[int16]string{
+	1: "task",
 }
 
 type ShotPreviewServiceV0_1 interface {
 	CreateShotPreviewTask(ctx context.Context, request *CreateShotPreviewTaskRequest) (r *CreateShotPreviewTaskResponse, err error)
+
+	GetShotPreviewTask(ctx context.Context, request *GetShotPreviewTaskRequest) (r *GetShotPreviewTaskResponse, err error)
+
+	CancelShotPreviewTask(ctx context.Context, request *CancelShotPreviewTaskRequest) (r *CancelShotPreviewTaskResponse, err error)
+
+	RetryShotPreviewTask(ctx context.Context, request *RetryShotPreviewTaskRequest) (r *RetryShotPreviewTaskResponse, err error)
 }
 
 type ShotPreviewServiceV0_1CreateShotPreviewTaskArgs struct {
@@ -258,5 +926,233 @@ func (p *ShotPreviewServiceV0_1CreateShotPreviewTaskResult) String() string {
 }
 
 var fieldIDToName_ShotPreviewServiceV0_1CreateShotPreviewTaskResult = map[int16]string{
+	0: "success",
+}
+
+type ShotPreviewServiceV0_1GetShotPreviewTaskArgs struct {
+	Request *GetShotPreviewTaskRequest `thrift:"request,1" frugal:"1,default,GetShotPreviewTaskRequest" json:"request"`
+}
+
+func NewShotPreviewServiceV0_1GetShotPreviewTaskArgs() *ShotPreviewServiceV0_1GetShotPreviewTaskArgs {
+	return &ShotPreviewServiceV0_1GetShotPreviewTaskArgs{}
+}
+
+func (p *ShotPreviewServiceV0_1GetShotPreviewTaskArgs) InitDefault() {
+}
+
+var ShotPreviewServiceV0_1GetShotPreviewTaskArgs_Request_DEFAULT *GetShotPreviewTaskRequest
+
+func (p *ShotPreviewServiceV0_1GetShotPreviewTaskArgs) GetRequest() (v *GetShotPreviewTaskRequest) {
+	if !p.IsSetRequest() {
+		return ShotPreviewServiceV0_1GetShotPreviewTaskArgs_Request_DEFAULT
+	}
+	return p.Request
+}
+func (p *ShotPreviewServiceV0_1GetShotPreviewTaskArgs) SetRequest(val *GetShotPreviewTaskRequest) {
+	p.Request = val
+}
+
+func (p *ShotPreviewServiceV0_1GetShotPreviewTaskArgs) IsSetRequest() bool {
+	return p.Request != nil
+}
+
+func (p *ShotPreviewServiceV0_1GetShotPreviewTaskArgs) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("ShotPreviewServiceV0_1GetShotPreviewTaskArgs(%+v)", *p)
+}
+
+var fieldIDToName_ShotPreviewServiceV0_1GetShotPreviewTaskArgs = map[int16]string{
+	1: "request",
+}
+
+type ShotPreviewServiceV0_1GetShotPreviewTaskResult struct {
+	Success *GetShotPreviewTaskResponse `thrift:"success,0,optional" frugal:"0,optional,GetShotPreviewTaskResponse" json:"success,omitempty"`
+}
+
+func NewShotPreviewServiceV0_1GetShotPreviewTaskResult() *ShotPreviewServiceV0_1GetShotPreviewTaskResult {
+	return &ShotPreviewServiceV0_1GetShotPreviewTaskResult{}
+}
+
+func (p *ShotPreviewServiceV0_1GetShotPreviewTaskResult) InitDefault() {
+}
+
+var ShotPreviewServiceV0_1GetShotPreviewTaskResult_Success_DEFAULT *GetShotPreviewTaskResponse
+
+func (p *ShotPreviewServiceV0_1GetShotPreviewTaskResult) GetSuccess() (v *GetShotPreviewTaskResponse) {
+	if !p.IsSetSuccess() {
+		return ShotPreviewServiceV0_1GetShotPreviewTaskResult_Success_DEFAULT
+	}
+	return p.Success
+}
+func (p *ShotPreviewServiceV0_1GetShotPreviewTaskResult) SetSuccess(x interface{}) {
+	p.Success = x.(*GetShotPreviewTaskResponse)
+}
+
+func (p *ShotPreviewServiceV0_1GetShotPreviewTaskResult) IsSetSuccess() bool {
+	return p.Success != nil
+}
+
+func (p *ShotPreviewServiceV0_1GetShotPreviewTaskResult) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("ShotPreviewServiceV0_1GetShotPreviewTaskResult(%+v)", *p)
+}
+
+var fieldIDToName_ShotPreviewServiceV0_1GetShotPreviewTaskResult = map[int16]string{
+	0: "success",
+}
+
+type ShotPreviewServiceV0_1CancelShotPreviewTaskArgs struct {
+	Request *CancelShotPreviewTaskRequest `thrift:"request,1" frugal:"1,default,CancelShotPreviewTaskRequest" json:"request"`
+}
+
+func NewShotPreviewServiceV0_1CancelShotPreviewTaskArgs() *ShotPreviewServiceV0_1CancelShotPreviewTaskArgs {
+	return &ShotPreviewServiceV0_1CancelShotPreviewTaskArgs{}
+}
+
+func (p *ShotPreviewServiceV0_1CancelShotPreviewTaskArgs) InitDefault() {
+}
+
+var ShotPreviewServiceV0_1CancelShotPreviewTaskArgs_Request_DEFAULT *CancelShotPreviewTaskRequest
+
+func (p *ShotPreviewServiceV0_1CancelShotPreviewTaskArgs) GetRequest() (v *CancelShotPreviewTaskRequest) {
+	if !p.IsSetRequest() {
+		return ShotPreviewServiceV0_1CancelShotPreviewTaskArgs_Request_DEFAULT
+	}
+	return p.Request
+}
+func (p *ShotPreviewServiceV0_1CancelShotPreviewTaskArgs) SetRequest(val *CancelShotPreviewTaskRequest) {
+	p.Request = val
+}
+
+func (p *ShotPreviewServiceV0_1CancelShotPreviewTaskArgs) IsSetRequest() bool {
+	return p.Request != nil
+}
+
+func (p *ShotPreviewServiceV0_1CancelShotPreviewTaskArgs) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("ShotPreviewServiceV0_1CancelShotPreviewTaskArgs(%+v)", *p)
+}
+
+var fieldIDToName_ShotPreviewServiceV0_1CancelShotPreviewTaskArgs = map[int16]string{
+	1: "request",
+}
+
+type ShotPreviewServiceV0_1CancelShotPreviewTaskResult struct {
+	Success *CancelShotPreviewTaskResponse `thrift:"success,0,optional" frugal:"0,optional,CancelShotPreviewTaskResponse" json:"success,omitempty"`
+}
+
+func NewShotPreviewServiceV0_1CancelShotPreviewTaskResult() *ShotPreviewServiceV0_1CancelShotPreviewTaskResult {
+	return &ShotPreviewServiceV0_1CancelShotPreviewTaskResult{}
+}
+
+func (p *ShotPreviewServiceV0_1CancelShotPreviewTaskResult) InitDefault() {
+}
+
+var ShotPreviewServiceV0_1CancelShotPreviewTaskResult_Success_DEFAULT *CancelShotPreviewTaskResponse
+
+func (p *ShotPreviewServiceV0_1CancelShotPreviewTaskResult) GetSuccess() (v *CancelShotPreviewTaskResponse) {
+	if !p.IsSetSuccess() {
+		return ShotPreviewServiceV0_1CancelShotPreviewTaskResult_Success_DEFAULT
+	}
+	return p.Success
+}
+func (p *ShotPreviewServiceV0_1CancelShotPreviewTaskResult) SetSuccess(x interface{}) {
+	p.Success = x.(*CancelShotPreviewTaskResponse)
+}
+
+func (p *ShotPreviewServiceV0_1CancelShotPreviewTaskResult) IsSetSuccess() bool {
+	return p.Success != nil
+}
+
+func (p *ShotPreviewServiceV0_1CancelShotPreviewTaskResult) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("ShotPreviewServiceV0_1CancelShotPreviewTaskResult(%+v)", *p)
+}
+
+var fieldIDToName_ShotPreviewServiceV0_1CancelShotPreviewTaskResult = map[int16]string{
+	0: "success",
+}
+
+type ShotPreviewServiceV0_1RetryShotPreviewTaskArgs struct {
+	Request *RetryShotPreviewTaskRequest `thrift:"request,1" frugal:"1,default,RetryShotPreviewTaskRequest" json:"request"`
+}
+
+func NewShotPreviewServiceV0_1RetryShotPreviewTaskArgs() *ShotPreviewServiceV0_1RetryShotPreviewTaskArgs {
+	return &ShotPreviewServiceV0_1RetryShotPreviewTaskArgs{}
+}
+
+func (p *ShotPreviewServiceV0_1RetryShotPreviewTaskArgs) InitDefault() {
+}
+
+var ShotPreviewServiceV0_1RetryShotPreviewTaskArgs_Request_DEFAULT *RetryShotPreviewTaskRequest
+
+func (p *ShotPreviewServiceV0_1RetryShotPreviewTaskArgs) GetRequest() (v *RetryShotPreviewTaskRequest) {
+	if !p.IsSetRequest() {
+		return ShotPreviewServiceV0_1RetryShotPreviewTaskArgs_Request_DEFAULT
+	}
+	return p.Request
+}
+func (p *ShotPreviewServiceV0_1RetryShotPreviewTaskArgs) SetRequest(val *RetryShotPreviewTaskRequest) {
+	p.Request = val
+}
+
+func (p *ShotPreviewServiceV0_1RetryShotPreviewTaskArgs) IsSetRequest() bool {
+	return p.Request != nil
+}
+
+func (p *ShotPreviewServiceV0_1RetryShotPreviewTaskArgs) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("ShotPreviewServiceV0_1RetryShotPreviewTaskArgs(%+v)", *p)
+}
+
+var fieldIDToName_ShotPreviewServiceV0_1RetryShotPreviewTaskArgs = map[int16]string{
+	1: "request",
+}
+
+type ShotPreviewServiceV0_1RetryShotPreviewTaskResult struct {
+	Success *RetryShotPreviewTaskResponse `thrift:"success,0,optional" frugal:"0,optional,RetryShotPreviewTaskResponse" json:"success,omitempty"`
+}
+
+func NewShotPreviewServiceV0_1RetryShotPreviewTaskResult() *ShotPreviewServiceV0_1RetryShotPreviewTaskResult {
+	return &ShotPreviewServiceV0_1RetryShotPreviewTaskResult{}
+}
+
+func (p *ShotPreviewServiceV0_1RetryShotPreviewTaskResult) InitDefault() {
+}
+
+var ShotPreviewServiceV0_1RetryShotPreviewTaskResult_Success_DEFAULT *RetryShotPreviewTaskResponse
+
+func (p *ShotPreviewServiceV0_1RetryShotPreviewTaskResult) GetSuccess() (v *RetryShotPreviewTaskResponse) {
+	if !p.IsSetSuccess() {
+		return ShotPreviewServiceV0_1RetryShotPreviewTaskResult_Success_DEFAULT
+	}
+	return p.Success
+}
+func (p *ShotPreviewServiceV0_1RetryShotPreviewTaskResult) SetSuccess(x interface{}) {
+	p.Success = x.(*RetryShotPreviewTaskResponse)
+}
+
+func (p *ShotPreviewServiceV0_1RetryShotPreviewTaskResult) IsSetSuccess() bool {
+	return p.Success != nil
+}
+
+func (p *ShotPreviewServiceV0_1RetryShotPreviewTaskResult) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("ShotPreviewServiceV0_1RetryShotPreviewTaskResult(%+v)", *p)
+}
+
+var fieldIDToName_ShotPreviewServiceV0_1RetryShotPreviewTaskResult = map[int16]string{
 	0: "success",
 }

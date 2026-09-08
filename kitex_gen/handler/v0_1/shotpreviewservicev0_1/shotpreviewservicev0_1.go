@@ -20,6 +20,27 @@ var serviceMethods = map[string]kitex.MethodInfo{
 		false,
 		kitex.WithStreamingMode(kitex.StreamingNone),
 	),
+	"GetShotPreviewTask": kitex.NewMethodInfo(
+		getShotPreviewTaskHandler,
+		newShotPreviewServiceV0_1GetShotPreviewTaskArgs,
+		newShotPreviewServiceV0_1GetShotPreviewTaskResult,
+		false,
+		kitex.WithStreamingMode(kitex.StreamingNone),
+	),
+	"CancelShotPreviewTask": kitex.NewMethodInfo(
+		cancelShotPreviewTaskHandler,
+		newShotPreviewServiceV0_1CancelShotPreviewTaskArgs,
+		newShotPreviewServiceV0_1CancelShotPreviewTaskResult,
+		false,
+		kitex.WithStreamingMode(kitex.StreamingNone),
+	),
+	"RetryShotPreviewTask": kitex.NewMethodInfo(
+		retryShotPreviewTaskHandler,
+		newShotPreviewServiceV0_1RetryShotPreviewTaskArgs,
+		newShotPreviewServiceV0_1RetryShotPreviewTaskResult,
+		false,
+		kitex.WithStreamingMode(kitex.StreamingNone),
+	),
 }
 
 var (
@@ -104,6 +125,60 @@ func newShotPreviewServiceV0_1CreateShotPreviewTaskResult() interface{} {
 	return v0_1.NewShotPreviewServiceV0_1CreateShotPreviewTaskResult()
 }
 
+func getShotPreviewTaskHandler(ctx context.Context, handler interface{}, arg, result interface{}) error {
+	realArg := arg.(*v0_1.ShotPreviewServiceV0_1GetShotPreviewTaskArgs)
+	realResult := result.(*v0_1.ShotPreviewServiceV0_1GetShotPreviewTaskResult)
+	success, err := handler.(v0_1.ShotPreviewServiceV0_1).GetShotPreviewTask(ctx, realArg.Request)
+	if err != nil {
+		return err
+	}
+	realResult.Success = success
+	return nil
+}
+func newShotPreviewServiceV0_1GetShotPreviewTaskArgs() interface{} {
+	return v0_1.NewShotPreviewServiceV0_1GetShotPreviewTaskArgs()
+}
+
+func newShotPreviewServiceV0_1GetShotPreviewTaskResult() interface{} {
+	return v0_1.NewShotPreviewServiceV0_1GetShotPreviewTaskResult()
+}
+
+func cancelShotPreviewTaskHandler(ctx context.Context, handler interface{}, arg, result interface{}) error {
+	realArg := arg.(*v0_1.ShotPreviewServiceV0_1CancelShotPreviewTaskArgs)
+	realResult := result.(*v0_1.ShotPreviewServiceV0_1CancelShotPreviewTaskResult)
+	success, err := handler.(v0_1.ShotPreviewServiceV0_1).CancelShotPreviewTask(ctx, realArg.Request)
+	if err != nil {
+		return err
+	}
+	realResult.Success = success
+	return nil
+}
+func newShotPreviewServiceV0_1CancelShotPreviewTaskArgs() interface{} {
+	return v0_1.NewShotPreviewServiceV0_1CancelShotPreviewTaskArgs()
+}
+
+func newShotPreviewServiceV0_1CancelShotPreviewTaskResult() interface{} {
+	return v0_1.NewShotPreviewServiceV0_1CancelShotPreviewTaskResult()
+}
+
+func retryShotPreviewTaskHandler(ctx context.Context, handler interface{}, arg, result interface{}) error {
+	realArg := arg.(*v0_1.ShotPreviewServiceV0_1RetryShotPreviewTaskArgs)
+	realResult := result.(*v0_1.ShotPreviewServiceV0_1RetryShotPreviewTaskResult)
+	success, err := handler.(v0_1.ShotPreviewServiceV0_1).RetryShotPreviewTask(ctx, realArg.Request)
+	if err != nil {
+		return err
+	}
+	realResult.Success = success
+	return nil
+}
+func newShotPreviewServiceV0_1RetryShotPreviewTaskArgs() interface{} {
+	return v0_1.NewShotPreviewServiceV0_1RetryShotPreviewTaskArgs()
+}
+
+func newShotPreviewServiceV0_1RetryShotPreviewTaskResult() interface{} {
+	return v0_1.NewShotPreviewServiceV0_1RetryShotPreviewTaskResult()
+}
+
 type kClient struct {
 	c client.Client
 }
@@ -119,6 +194,36 @@ func (p *kClient) CreateShotPreviewTask(ctx context.Context, request *v0_1.Creat
 	_args.Request = request
 	var _result v0_1.ShotPreviewServiceV0_1CreateShotPreviewTaskResult
 	if err = p.c.Call(ctx, "CreateShotPreviewTask", &_args, &_result); err != nil {
+		return
+	}
+	return _result.GetSuccess(), nil
+}
+
+func (p *kClient) GetShotPreviewTask(ctx context.Context, request *v0_1.GetShotPreviewTaskRequest) (r *v0_1.GetShotPreviewTaskResponse, err error) {
+	var _args v0_1.ShotPreviewServiceV0_1GetShotPreviewTaskArgs
+	_args.Request = request
+	var _result v0_1.ShotPreviewServiceV0_1GetShotPreviewTaskResult
+	if err = p.c.Call(ctx, "GetShotPreviewTask", &_args, &_result); err != nil {
+		return
+	}
+	return _result.GetSuccess(), nil
+}
+
+func (p *kClient) CancelShotPreviewTask(ctx context.Context, request *v0_1.CancelShotPreviewTaskRequest) (r *v0_1.CancelShotPreviewTaskResponse, err error) {
+	var _args v0_1.ShotPreviewServiceV0_1CancelShotPreviewTaskArgs
+	_args.Request = request
+	var _result v0_1.ShotPreviewServiceV0_1CancelShotPreviewTaskResult
+	if err = p.c.Call(ctx, "CancelShotPreviewTask", &_args, &_result); err != nil {
+		return
+	}
+	return _result.GetSuccess(), nil
+}
+
+func (p *kClient) RetryShotPreviewTask(ctx context.Context, request *v0_1.RetryShotPreviewTaskRequest) (r *v0_1.RetryShotPreviewTaskResponse, err error) {
+	var _args v0_1.ShotPreviewServiceV0_1RetryShotPreviewTaskArgs
+	_args.Request = request
+	var _result v0_1.ShotPreviewServiceV0_1RetryShotPreviewTaskResult
+	if err = p.c.Call(ctx, "RetryShotPreviewTask", &_args, &_result); err != nil {
 		return
 	}
 	return _result.GetSuccess(), nil
