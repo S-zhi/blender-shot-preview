@@ -99,7 +99,7 @@ func main() {
 }
 
 func newServer(manager llm_gateway.KeyManager) (server.Server, error) {
-	handler := handlerv0_1.NewShotPreviewHandler(&service.ShotPreviewServiceImpl{})
+	handler := handlerv0_1.NewShotPreviewHandler(service.NewShotPreviewService(nil))
 	keyHandler := handlerv0_1.NewLLMKeyHandler(service.NewLLMKeyService(manager))
 	svr := shotpreviewservicev0_1.NewServer(handler)
 	if err := llmkeyservicev0_1.RegisterService(svr, keyHandler); err != nil {
