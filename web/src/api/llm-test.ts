@@ -14,6 +14,10 @@ export interface TestConnectionResult {
 
 /**
  * Perform a lightweight connection test for OpenAI / Azure OpenAI protocol endpoints.
+ *
+ * The request is proxied through the backend (/api/v0_1/llm-probe) to avoid
+ * browser CORS restrictions when the LLM endpoint does not allow cross-origin
+ * requests from localhost.
  */
 export async function testLLMConnection(params: TestConnectionParams): Promise<TestConnectionResult> {
   const { providerType, baseUrl, apiKey, modelName, apiVersion } = params;
@@ -25,39 +29,18 @@ export async function testLLMConnection(params: TestConnectionParams): Promise<T
 
   const startTime = Date.now();
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 12000); // 12s timeout
+  const timeoutId = setTimeout(() => controller.abort(), 14000); // slightly longer than backend's 12s
 
   try {
-    let testUrl = "";
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-    };
-
-    if (providerType === "azure_openai") {
-      // Azure OpenAI chat completions URL format:
-      // {endpoint}/openai/deployments/{deployment-id}/chat/completions?api-version={api-version}
-      const version = (apiVersion || "2024-02-15-preview").trim();
-      const deployment = modelName.trim() || "gpt-4o";
-      testUrl = `${cleanBaseUrl}/openai/deployments/${deployment}/chat/completions?api-version=${version}`;
-      if (apiKey) {
-        headers["api-key"] = apiKey.trim();
-      }
-    } else {
-      // Standard OpenAI compatible format:
-      testUrl = `${cleanBaseUrl}/chat/completions`;
-      if (apiKey) {
-        headers["Authorization"] = `Bearer ${apiKey.trim()}`;
-      }
-    }
-
-    // Send minimal test prompt
-    const response = await fetch(testUrl, {
+    const response = await fetch("/api/v0_1/llm-probe", {
       method: "POST",
-      headers,
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: modelName.trim() || "gpt-4o",
-        messages: [{ role: "user", content: "ping" }],
-        max_tokens: 1,
+        provider_type: providerType,
+        base_url: cleanBaseUrl,
+        api_key: apiKey,
+        model_name: modelName,
+        api_version: apiVersion ?? "",
       }),
       signal: controller.signal,
     });
@@ -65,39 +48,30 @@ export async function testLLMConnection(params: TestConnectionParams): Promise<T
     clearTimeout(timeoutId);
     const latencyMs = Date.now() - startTime;
 
-    if (response.ok) {
+    if (!response.ok) {
       return {
-        success: true,
-        message: `连接成功 (HTTP ${response.status} · 耗时 ${latencyMs}ms)`,
+        success: false,
+        message: `探针服务异常 (HTTP ${response.status})`,
         latencyMs,
       };
     }
 
-    // Try reading error message
-    let errDetail = `HTTP ${response.status} ${response.statusText}`;
-    try {
-      const errBody = await response.json();
-      if (errBody?.error?.message) {
-        errDetail += `: ${errBody.error.message}`;
-      }
-    } catch {
-      // Ignore JSON parse error on error response
-    }
-
+    const result = await response.json() as { success: boolean; message: string; latency_ms?: number };
     return {
-      success: false,
-      message: `连通性检测未通过: ${errDetail}`,
-      latencyMs,
+      success: result.success,
+      message: result.message,
+      latencyMs: result.latency_ms ?? latencyMs,
     };
   } catch (err: unknown) {
     clearTimeout(timeoutId);
     const latencyMs = Date.now() - startTime;
     if (err instanceof Error) {
       if (err.name === "AbortError") {
-        return { success: false, message: "连接超时 (12秒无响应)", latencyMs };
+        return { success: false, message: "探针请求超时 (14秒无响应)", latencyMs };
       }
-      return { success: false, message: `网络或跨域错误: ${err.message}`, latencyMs };
+      return { success: false, message: `探针请求失败: ${err.message}`, latencyMs };
     }
-    return { success: false, message: "未知的网络请求错误", latencyMs };
+    return { success: false, message: "未知的探针请求错误", latencyMs };
   }
 }
+

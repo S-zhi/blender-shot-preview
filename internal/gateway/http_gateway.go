@@ -79,6 +79,7 @@ func (g *HTTPGateway) routes() {
 	g.mux.HandleFunc("/api/v0_1/assets/upload", g.handleAssetUpload)
 	g.mux.HandleFunc("/api/v0_1/assets/stats", g.handleAssetStats)
 	g.mux.HandleFunc("/api/v0_1/assets/delete", g.handleAssetDelete)
+	g.mux.HandleFunc("/api/v0_1/llm-probe", g.handleLLMProbe)
 }
 
 func (g *HTTPGateway) handleConversations(w http.ResponseWriter, r *http.Request) {
@@ -690,8 +691,123 @@ func (g *HTTPGateway) handleArtifactDownload(w http.ResponseWriter, r *http.Requ
 	http.ServeFile(w, r, filePath)
 }
 
+
 func writeJSON(w http.ResponseWriter, status int, data interface{}) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(data)
 }
+
+// handleLLMProbe proxies a lightweight LLM connectivity test from the backend,
+// avoiding browser CORS restrictions. It never persists the supplied API key.
+func (g *HTTPGateway) handleLLMProbe(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+
+	type probeRequest struct {
+		ProviderType string `json:"provider_type"` // "openai" | "azure_openai" | "custom"
+		BaseURL      string `json:"base_url"`
+		APIKey       string `json:"api_key"`
+		ModelName    string `json:"model_name"`
+		APIVersion   string `json:"api_version"` // Azure only
+	}
+	type probeResponse struct {
+		Success   bool   `json:"success"`
+		Message   string `json:"message"`
+		LatencyMs int64  `json:"latency_ms,omitempty"`
+	}
+
+	var req probeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, probeResponse{Success: false, Message: "请求体解析失败: " + err.Error()})
+		return
+	}
+
+	cleanBase := strings.TrimRight(strings.TrimSpace(req.BaseURL), "/")
+	if cleanBase == "" {
+		writeJSON(w, http.StatusBadRequest, probeResponse{Success: false, Message: "base_url 不能为空"})
+		return
+	}
+
+	// Build target URL and headers
+	var targetURL string
+	headers := map[string]string{"Content-Type": "application/json"}
+
+	if req.ProviderType == "azure_openai" {
+		ver := strings.TrimSpace(req.APIVersion)
+		if ver == "" {
+			ver = "2024-02-15-preview"
+		}
+		deployment := strings.TrimSpace(req.ModelName)
+		if deployment == "" {
+			deployment = "gpt-4o"
+		}
+		targetURL = fmt.Sprintf("%s/openai/deployments/%s/chat/completions?api-version=%s", cleanBase, deployment, ver)
+		if req.APIKey != "" {
+			headers["api-key"] = strings.TrimSpace(req.APIKey)
+		}
+	} else {
+		targetURL = cleanBase + "/chat/completions"
+		if req.APIKey != "" {
+			headers["Authorization"] = "Bearer " + strings.TrimSpace(req.APIKey)
+		}
+	}
+
+	modelName := strings.TrimSpace(req.ModelName)
+	if modelName == "" {
+		modelName = "gpt-4o"
+	}
+	body := fmt.Sprintf(`{"model":%q,"messages":[{"role":"user","content":"ping"}],"max_tokens":1}`, modelName)
+
+	client := &http.Client{Timeout: 12 * time.Second}
+	probeReq, err := http.NewRequestWithContext(r.Context(), http.MethodPost, targetURL, strings.NewReader(body))
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, probeResponse{Success: false, Message: "构建请求失败: " + err.Error()})
+		return
+	}
+	for k, v := range headers {
+		probeReq.Header.Set(k, v)
+	}
+
+	start := time.Now()
+	resp, err := client.Do(probeReq)
+	latencyMs := time.Since(start).Milliseconds()
+	if err != nil {
+		msg := "网络错误: " + err.Error()
+		if strings.Contains(err.Error(), "context deadline exceeded") || strings.Contains(err.Error(), "timeout") {
+			msg = "连接超时 (12秒无响应)"
+		}
+		writeJSON(w, http.StatusOK, probeResponse{Success: false, Message: msg, LatencyMs: latencyMs})
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		writeJSON(w, http.StatusOK, probeResponse{
+			Success:   true,
+			Message:   fmt.Sprintf("连接成功 (HTTP %d · 耗时 %dms)", resp.StatusCode, latencyMs),
+			LatencyMs: latencyMs,
+		})
+		return
+	}
+
+	// Forward error detail from upstream
+	errDetail := fmt.Sprintf("HTTP %d %s", resp.StatusCode, resp.Status)
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	var errBody struct {
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(raw, &errBody) == nil && errBody.Error.Message != "" {
+		errDetail += ": " + errBody.Error.Message
+	}
+	writeJSON(w, http.StatusOK, probeResponse{
+		Success:   false,
+		Message:   "连通性检测未通过: " + errDetail,
+		LatencyMs: latencyMs,
+	})
+}
+
