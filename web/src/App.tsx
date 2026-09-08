@@ -1,12 +1,18 @@
-import React from "react";
+import React, { useEffect } from "react";
 import { Sidebar } from "#/components/sidebar/sidebar";
 import { ChatArea } from "#/components/conversation/chat-area";
 import { AssetDashboard } from "#/components/assets/asset-dashboard";
 import { SettingsView } from "#/components/settings/settings-view";
 import { useNavigationStore } from "#/stores/navigation-store";
+import { useConversationStore } from "#/stores/conversation-store";
 
 export const App: React.FC = () => {
   const { activeView } = useNavigationStore();
+  const hydrateConversations = useConversationStore((state) => state.hydrateConversations);
+
+  useEffect(() => {
+    void hydrateConversations();
+  }, [hydrateConversations]);
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-[#090b0e] text-content font-sans">

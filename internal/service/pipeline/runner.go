@@ -587,6 +587,9 @@ func (r *Runner) Subscribe(taskID string) (<-chan PipelineEvent, func()) {
 }
 
 func (r *Runner) broadcast(event PipelineEvent) {
+	if events, ok := r.repository.(EventRepository); ok {
+		_ = events.AppendEvent(context.Background(), event)
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if subs, ok := r.subscribers[event.TaskID]; ok {

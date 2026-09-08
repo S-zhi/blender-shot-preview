@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -13,11 +14,16 @@ import (
 // ShotPreviewServiceImpl preserves the RPC service boundary while delegating
 // asynchronous production to a fully configured pipeline.Runner.
 type ShotPreviewServiceImpl struct {
-	runner *pipeline.Runner
+	runner        *pipeline.Runner
+	conversations ConversationStore
 }
 
 func NewShotPreviewService(runner *pipeline.Runner) *ShotPreviewServiceImpl {
 	return &ShotPreviewServiceImpl{runner: runner}
+}
+
+func NewShotPreviewServiceWithConversations(runner *pipeline.Runner, conversations ConversationStore) *ShotPreviewServiceImpl {
+	return &ShotPreviewServiceImpl{runner: runner, conversations: conversations}
 }
 
 func (s *ShotPreviewServiceImpl) CreateTask(ctx context.Context, request CreateTaskRequest) (CreateTaskResult, error) {
@@ -36,11 +42,30 @@ func (s *ShotPreviewServiceImpl) CreateTask(ctx context.Context, request CreateT
 	if s == nil || s.runner == nil {
 		return CreateTaskResult{RequestID: requestID, Status: CreateStatusRejected}, ErrPipelineUnavailable
 	}
+	conversationID := strings.TrimSpace(request.ConversationID)
+	if s.conversations != nil {
+		conversation, err := s.conversations.Ensure(ctx, userID, conversationID, prompt)
+		if err != nil {
+			return CreateTaskResult{RequestID: requestID, Status: CreateStatusRejected}, fmt.Errorf("persist conversation: %w", err)
+		}
+		conversationID = conversation.ID
+	}
+	now := time.Now().UTC()
+	userMessage := Message{ID: requestID + ":user", Role: "user", Content: prompt, CreatedAt: now, UpdatedAt: now}
+	assistantMessage := Message{ID: requestID + ":assistant", Role: "assistant", Content: "", Status: "sending", CreatedAt: now, UpdatedAt: now}
+	if s.conversations != nil {
+		if err := s.conversations.CreateMessage(ctx, conversationID, userMessage); err != nil {
+			return CreateTaskResult{RequestID: requestID, Status: CreateStatusRejected}, fmt.Errorf("persist user message: %w", err)
+		}
+		if err := s.conversations.CreateMessage(ctx, conversationID, assistantMessage); err != nil {
+			return CreateTaskResult{RequestID: requestID, Status: CreateStatusRejected}, fmt.Errorf("persist assistant message: %w", err)
+		}
+	}
 
 	input, err := pipeline.NewSnapshot(shotPreviewInput{
 		UserID:         userID,
 		Prompt:         prompt,
-		ConversationID: strings.TrimSpace(request.ConversationID),
+		ConversationID: conversationID,
 		RequestID:      requestID,
 	})
 	if err != nil {
@@ -53,10 +78,28 @@ func (s *ShotPreviewServiceImpl) CreateTask(ctx context.Context, request CreateT
 		RequireConfirmation: request.RequireConfirmation,
 	})
 	if err != nil {
+		if s.conversations != nil {
+			assistantMessage.Status = "error"
+			assistantMessage.Content = "分镜任务创建失败：" + err.Error()
+			assistantMessage.UpdatedAt = time.Now().UTC()
+			_ = s.conversations.UpdateMessage(ctx, assistantMessage)
+		}
 		if errors.Is(err, pipeline.ErrIdempotencyConflict) {
 			return CreateTaskResult{RequestID: requestID, Status: CreateStatusRejected}, ErrInvalidTaskRequest
 		}
 		return CreateTaskResult{RequestID: requestID, Status: CreateStatusRejected}, err
+	}
+	if s.conversations != nil {
+		assistantMessage.TaskID = task.ID
+		assistantMessage.Status = "thought"
+		assistantMessage.Thoughts = []string{"分镜任务已创建，等待 Agent 工作流推进..."}
+		assistantMessage.UpdatedAt = time.Now().UTC()
+		if err := s.conversations.UpdateMessage(ctx, assistantMessage); err != nil {
+			return CreateTaskResult{RequestID: requestID, Status: CreateStatusRejected}, fmt.Errorf("update assistant task link: %w", err)
+		}
+		// The runner starts asynchronously and may finish very quickly in the
+		// development model. Sync once after inserting the task link.
+		s.syncConversation(ctx, task.ID, taskView(task))
 	}
 	return CreateTaskResult{
 		TaskID: task.ID, RequestID: requestID, Status: CreateStatusAccepted, Replayed: !created,
@@ -102,7 +145,16 @@ func (s *ShotPreviewServiceImpl) GetTask(ctx context.Context, request GetTaskReq
 	if err != nil {
 		return TaskView{}, err
 	}
-	return taskView(task), nil
+	view := taskView(task)
+	s.syncConversation(ctx, task.ID, view)
+	return view, nil
+}
+
+func (s *ShotPreviewServiceImpl) syncConversation(ctx context.Context, taskID string, view TaskView) {
+	if s == nil || s.conversations == nil {
+		return
+	}
+	_ = s.conversations.UpdateTask(ctx, taskID, view)
 }
 
 func (s *ShotPreviewServiceImpl) CancelTask(ctx context.Context, request CancelTaskRequest) (TaskView, error) {

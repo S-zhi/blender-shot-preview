@@ -109,38 +109,38 @@ const (
 )
 
 type TaskView struct {
-	TaskID          string
-	Status          TaskStatus
-	WorkflowID      string
-	WorkflowVersion string
-	Nodes           []NodeView
-	Artifacts       []ArtifactView
-	Failure         *FailureView
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
-	FinishedAt      *time.Time
+	TaskID          string         `json:"task_id"`
+	Status          TaskStatus     `json:"status"`
+	WorkflowID      string         `json:"workflow_id"`
+	WorkflowVersion string         `json:"workflow_version"`
+	Nodes           []NodeView     `json:"nodes"`
+	Artifacts       []ArtifactView `json:"artifacts"`
+	Failure         *FailureView   `json:"failure,omitempty"`
+	CreatedAt       time.Time      `json:"created_at"`
+	UpdatedAt       time.Time      `json:"updated_at"`
+	FinishedAt      *time.Time     `json:"finished_at,omitempty"`
 }
 
 type NodeView struct {
-	ID         string
-	Status     NodeStatus
-	Attempts   int
-	Input      *string
-	Output     *string
-	ErrorCode  string
-	StartedAt  *time.Time
-	FinishedAt *time.Time
-	Failure    *FailureView
+	ID         string       `json:"node_id"`
+	Status     NodeStatus   `json:"status"`
+	Attempts   int          `json:"attempts"`
+	Input      *string      `json:"input,omitempty"`
+	Output     *string      `json:"output,omitempty"`
+	ErrorCode  string       `json:"error_code,omitempty"`
+	StartedAt  *time.Time   `json:"started_at,omitempty"`
+	FinishedAt *time.Time   `json:"finished_at,omitempty"`
+	Failure    *FailureView `json:"failure,omitempty"`
 }
 
 type ArtifactView struct {
-	Type string
-	URI  string
-	Name string
+	Type string `json:"type"`
+	URI  string `json:"uri"`
+	Name string `json:"name"`
 }
 
 type FailureView struct {
-	Code      string
-	Message   string
-	Retryable bool
+	Code      string `json:"code"`
+	Message   string `json:"message"`
+	Retryable bool   `json:"retryable"`
 }

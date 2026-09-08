@@ -16,6 +16,12 @@ type Repository interface {
 	ListIncomplete(ctx context.Context) ([]Task, error)
 }
 
+// EventRepository is an optional extension used by durable implementations to
+// retain the SSE audit trail without forcing test repositories to implement it.
+type EventRepository interface {
+	AppendEvent(ctx context.Context, event PipelineEvent) error
+}
+
 // MemoryRepository is an in-process implementation suitable for tests and the
 // MVP bootstrap. It returns defensive copies at every boundary.
 type MemoryRepository struct {
