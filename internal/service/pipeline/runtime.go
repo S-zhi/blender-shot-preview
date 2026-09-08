@@ -18,19 +18,24 @@ import (
 // AgentServiceInvoker adapts the application agent service to pipeline nodes
 // and owns the domain-specific input projection between workflow snapshots.
 type AgentServiceInvoker struct {
-	Service agent.AgentService
-	Keys    llmgateway.KeyUser
+	Service    agent.AgentService
+	Keys       llmgateway.KeyUser
+	RequireLLM bool
 }
 
 // NewShotPreviewRunner assembles the stable shot-preview runtime boundary.
 // Callers retain ownership of persistence, agent bootstrap, and tool setup.
 func NewShotPreviewRunner(repository Repository, agents agent.AgentService, skills agent.SkillRegistry) *Runner {
-	return NewShotPreviewRunnerWithKeys(repository, agents, skills, nil)
+	return newShotPreviewRunner(repository, agents, skills, nil, false)
 }
 
 // NewShotPreviewRunnerWithKeys allows configuring a KeyUser to resolve credentials for agents dynamically.
 func NewShotPreviewRunnerWithKeys(repository Repository, agents agent.AgentService, skills agent.SkillRegistry, keys llmgateway.KeyUser) *Runner {
-	agentInvoker := AgentServiceInvoker{Service: agents, Keys: keys}
+	return newShotPreviewRunner(repository, agents, skills, keys, true)
+}
+
+func newShotPreviewRunner(repository Repository, agents agent.AgentService, skills agent.SkillRegistry, keys llmgateway.KeyUser, requireLLM bool) *Runner {
+	agentInvoker := AgentServiceInvoker{Service: agents, Keys: keys, RequireLLM: requireLLM}
 	return NewRunner(
 		repository,
 		agentInvoker,
@@ -53,7 +58,26 @@ func (i AgentServiceInvoker) InvokeAgent(ctx context.Context, request AgentReque
 		UserID: identity.UserID, TenantID: identity.UserID,
 	}
 
-	if i.Keys != nil && identity.UserID != "" {
+	if i.RequireLLM {
+		if i.Keys == nil {
+			return nil, &agent.LLMError{Code: agent.LLMNotConfigured, Cause: errors.New("no LLM credential provider configured")}
+		}
+		if identity.UserID == "" {
+			return nil, &agent.LLMError{Code: agent.LLMCredentialUnavailable, Cause: errors.New("user identity is required to resolve an LLM credential")}
+		}
+		usableKey, keyErr := i.Keys.Use(ctx, "", identity.UserID)
+		if keyErr != nil {
+			code := agent.LLMCredentialUnavailable
+			if errors.Is(keyErr, llmgateway.ErrCredentialNotFound) || errors.Is(keyErr, llmgateway.ErrInvalidCommand) {
+				code = agent.LLMNotConfigured
+			}
+			return nil, &agent.LLMError{Code: code, Cause: errors.New("no usable LLM credential is available")}
+		}
+		if strings.TrimSpace(usableKey.APIKey) == "" {
+			return nil, &agent.LLMError{Code: agent.LLMNotConfigured, Cause: errors.New("resolved LLM credential has no API key")}
+		}
+		agentReq.Model = agent.NewChatModelFromKey(usableKey, "")
+	} else if i.Keys != nil && identity.UserID != "" {
 		if usableKey, err := i.Keys.Use(ctx, "", identity.UserID); err == nil && usableKey.APIKey != "" {
 			agentReq.Model = agent.NewChatModelFromKey(usableKey, "")
 		}

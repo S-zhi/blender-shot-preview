@@ -23,6 +23,13 @@ process loses all credentials. PostgreSQL remains a future `CredentialStore`
 implementation. This version trusts `user_id`; deploy behind an authenticated
 RPC boundary that validates it, not directly on an untrusted public network.
 
+Shot-preview execution requires a usable LLM credential by default. The
+deterministic `devChatModel` is available only when
+`SHOT_PREVIEW_DEV_MODE=true` is explicitly set; otherwise missing credentials,
+unreachable endpoints, timeouts, provider errors, and invalid responses fail
+the task with an actionable `LLM_*` error code instead of silently simulating
+an agent run.
+
 Run `make generate` with Kitex v0.16.0 to regenerate both IDLs. Verify with
 `go test ./...` and `go vet ./...`.
 

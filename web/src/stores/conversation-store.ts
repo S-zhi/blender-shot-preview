@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { Conversation, Message, TaskNodeView } from "#/api/types";
+import { Conversation, Message, TaskNodeView, TaskStatus } from "#/api/types";
 import { ShotPreviewService } from "#/api/shot-preview-service";
 
 interface ConversationState {
@@ -68,6 +68,7 @@ const initialConversations: Conversation[] = [
 ];
 
 const activeEventSources = new Map<string, EventSource>();
+const activeStreamClosers = new Map<string, () => void>();
 
 export const useConversationStore = create<ConversationState>((set, get) => ({
   conversations: initialConversations,
@@ -141,6 +142,7 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
       content: "",
       timestamp: Date.now(),
       isThinking: true,
+      status: "connecting",
       thoughts: [],
       nodes: [],
       autoConfirm: false,
@@ -173,6 +175,9 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
         prompt,
         conversation_id: convId,
       });
+      if (!taskRes.task_id || taskRes.status === TaskStatus.REJECTED) {
+        throw new Error("LLM / 后端拒绝创建分镜任务");
+      }
 
       // Update message with taskId
       set((state) => ({
@@ -185,6 +190,7 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
                   ? {
                       ...m,
                       taskId: taskRes.task_id,
+                      status: "running",
                       thoughts: [
                         `分镜任务已创建 (Task ID: ${taskRes.task_id})`,
                         "已连接实时执行流，等待 Agent 工作流推进...",
@@ -202,18 +208,89 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
       const streamUrl = ShotPreviewService.getTaskStreamUrl(taskRes.task_id);
       const eventSource = new EventSource(streamUrl);
       activeEventSources.set(assistantMsgId, eventSource);
+      let settled = false;
+      let inactivityTimer: ReturnType<typeof setTimeout> | undefined;
 
       const closeStream = () => {
+        if (settled) return;
+        settled = true;
+        if (inactivityTimer) clearTimeout(inactivityTimer);
         eventSource.close();
         activeEventSources.delete(assistantMsgId);
+        activeStreamClosers.delete(assistantMsgId);
         set({ isGenerating: false });
       };
 
+      const markActivity = () => {
+        if (inactivityTimer) clearTimeout(inactivityTimer);
+        inactivityTimer = setTimeout(() => {
+          if (settled) return;
+          set((state) => ({
+            conversations: state.conversations.map((c) =>
+              c.id !== convId
+                ? c
+                : {
+                    ...c,
+                    messages: c.messages.map((m) =>
+                      m.id !== assistantMsgId
+                        ? m
+                        : {
+                            ...m,
+                            status: "timeout",
+                            isThinking: false,
+                            content: "### ❌ 分镜生成任务超时\n\n模型服务或实时执行流在规定时间内没有响应。",
+                            thoughts: [...(m.thoughts || []), "✖ 实时执行流超时，已停止等待"],
+                          }
+                    ),
+                  }
+            ),
+          }));
+          closeStream();
+        }, 120000);
+      };
+
+      const pauseInactivityTimeout = () => {
+        if (inactivityTimer) clearTimeout(inactivityTimer);
+        inactivityTimer = undefined;
+      };
+
+      const failStream = (status: "error" | "disconnected", content: string) => {
+        if (settled) return;
+        set((state) => ({
+          conversations: state.conversations.map((c) =>
+            c.id !== convId
+              ? c
+              : {
+                  ...c,
+                  messages: c.messages.map((m) =>
+                    m.id !== assistantMsgId
+                      ? m
+                      : {
+                          ...m,
+                          status,
+                          isThinking: false,
+                          content,
+                          thoughts: [...(m.thoughts || []), `✖ ${content.replace(/^### .*\n\n/, "")}`],
+                        }
+                  ),
+                }
+          ),
+        }));
+        closeStream();
+      };
+
+      activeStreamClosers.set(assistantMsgId, closeStream);
+      markActivity();
+
       eventSource.addEventListener("task_snapshot", (e) => {
         try {
+          markActivity();
           const payload = JSON.parse(e.data);
           const task = payload.task;
           if (!task) return;
+          if (task.nodes?.some((n: TaskNodeView) => n.status === "waiting_confirmation")) {
+            pauseInactivityTimeout();
+          }
 
           set((state) => ({
             conversations: state.conversations.map((c) => {
@@ -227,16 +304,21 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
                           (n: TaskNodeView) => n.status === "waiting_confirmation"
                         ) || null;
                       const isDone = task.status === "succeeded";
+                      const isFailed = task.status === "failed" || task.status === "cancelled";
+                      const isWaiting = Boolean(waitingNode);
+                      const failureMessage = task.failure?.message || (task.status === "cancelled" ? "任务已取消" : "Agent 或模型服务执行失败");
                       return {
                         ...m,
                         nodes: task.nodes,
                         artifacts: task.artifacts,
                         waitingNode,
-                        status: isDone ? "done" : m.status,
-                        isThinking: !isDone,
+                        status: isDone ? "done" : isFailed ? "error" : isWaiting ? "waiting_confirmation" : "running",
+                        isThinking: !isDone && !isFailed && !isWaiting,
                         content: isDone
                           ? "### 🎬 分镜预览工作流已全部执行完成\n\n已成功生成分镜视频制品，可点击下方按钮下载。"
-                          : m.content,
+                          : isFailed
+                            ? `### ❌ 分镜生成任务失败\n\n**错误详情**：${failureMessage}`
+                            : m.content,
                       };
                     }
                     return m;
@@ -246,7 +328,7 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
               return c;
             }),
           }));
-          if (task.status === "succeeded" || task.status === "failed") {
+          if (task.status === "succeeded" || task.status === "failed" || task.status === "cancelled") {
             closeStream();
           }
         } catch (err) {
@@ -256,6 +338,7 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
 
       eventSource.addEventListener("node_started", (e) => {
         try {
+          markActivity();
           const payload = JSON.parse(e.data);
           const nodeId = payload.node_id;
           set((state) => ({
@@ -274,6 +357,8 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
                         : [{ node_id: nodeId, status: "running" as const, attempts: 1, input: payload.input }];
                       return {
                         ...m,
+                        status: "running",
+                        isThinking: true,
                         nodes: updatedNodes,
                         thoughts: [...(m.thoughts || []), `▶ 节点 [${nodeId}] 开始执行...`],
                       };
@@ -292,8 +377,10 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
 
       eventSource.addEventListener("node_waiting_confirmation", (e) => {
         try {
+          markActivity();
           const payload = JSON.parse(e.data);
           const nodeId = payload.node_id;
+          pauseInactivityTimeout();
           const waitingNode: TaskNodeView = {
             node_id: nodeId,
             status: "waiting_confirmation",
@@ -332,6 +419,8 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
 
                       return {
                         ...m,
+                        status: m.autoConfirm ? "running" : "waiting_confirmation",
+                        isThinking: Boolean(m.autoConfirm),
                         nodes: updatedNodes,
                         waitingNode: m.autoConfirm ? null : waitingNode,
                         thoughts: [
@@ -354,6 +443,7 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
 
       eventSource.addEventListener("node_output_adjusted", (e) => {
         try {
+          markActivity();
           const payload = JSON.parse(e.data);
           const nodeId = payload.node_id;
           set((state) => ({
@@ -385,6 +475,7 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
 
       eventSource.addEventListener("node_succeeded", (e) => {
         try {
+          markActivity();
           const payload = JSON.parse(e.data);
           const nodeId = payload.node_id;
           set((state) => ({
@@ -420,6 +511,7 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
 
       eventSource.addEventListener("task_succeeded", (e) => {
         try {
+          markActivity();
           const payload = JSON.parse(e.data);
           set((state) => ({
             isGenerating: false,
@@ -456,6 +548,7 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
 
       eventSource.addEventListener("task_failed", (e) => {
         try {
+          markActivity();
           const payload = JSON.parse(e.data);
           set((state) => ({
             isGenerating: false,
@@ -470,7 +563,7 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
                         status: "error",
                         isThinking: false,
                         content: `### ❌ 分镜生成任务失败\n\n**错误详情**：${payload.error || "执行过程中发生异常"}`,
-                        thoughts: [...(m.thoughts || []), `✖ 任务失败: ${payload.error || "未知异常"}`],
+                        thoughts: [...(m.thoughts || []), `✖ 任务失败${payload.error_code ? ` [${payload.error_code}]` : ""}: ${payload.error || "未知异常"}`],
                       };
                     }
                     return m;
@@ -489,9 +582,11 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
 
       eventSource.onerror = (err) => {
         console.warn("EventSource error:", err);
+        failStream("disconnected", "### ❌ 实时执行流已断开\n\n无法继续接收 Agent 状态，请检查后端服务和模型连接。 ");
       };
     } catch {
       set((state) => ({
+        isGenerating: false,
         conversations: state.conversations.map((c) => {
           if (c.id === convId) {
             return {
@@ -618,8 +713,10 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
   },
 
   stopGenerating: () => {
+    activeStreamClosers.forEach((close) => close());
     activeEventSources.forEach((source) => source.close());
     activeEventSources.clear();
+    activeStreamClosers.clear();
     set({ isGenerating: false });
   },
 }));

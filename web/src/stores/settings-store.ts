@@ -24,7 +24,7 @@ interface SettingsState {
 
 export const useSettingsStore = create<SettingsState>((set, get) => ({
   isModalOpen: false,
-  userId: "user_default_001",
+  userId: "default_user_001",
   provider: LLMProvider.OPENAI,
   modelName: "gpt-4o",
   apiKey: "",

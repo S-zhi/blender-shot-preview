@@ -197,7 +197,10 @@ func taskView(task pipeline.Task) TaskView {
 				msg = "Production step failed"
 			}
 			nodeView.Failure = &FailureView{
-				Code: "NODE_FAILED", Message: msg, Retryable: true,
+				Code: node.ErrorCode, Message: msg, Retryable: node.ErrorCode != "LLM_AUTH_FAILED" && node.ErrorCode != "LLM_NOT_CONFIGURED",
+			}
+			if nodeView.Failure.Code == "" {
+				nodeView.Failure.Code = "NODE_FAILED"
 			}
 			if view.Failure == nil {
 				view.Failure = nodeView.Failure

@@ -110,6 +110,24 @@ func TestGatewayRejectsAnotherUser(t *testing.T) {
 	}
 }
 
+func TestGatewayUsesActiveCredentialWhenKeyIDOmitted(t *testing.T) {
+	store := newMemoryCredentialStore()
+	gateway := newTestGateway(t, store)
+	name, apiKey := "primary OpenAI", "secret"
+	if _, err := gateway.Execute(context.Background(), KeyCommand{
+		Type: KeyCommandSave, UserID: "user-a", Provider: ProviderOpenAI, Name: &name, APIKey: &apiKey,
+	}); err != nil {
+		t.Fatalf("save credential: %v", err)
+	}
+	used, err := gateway.Use(context.Background(), "", "user-a")
+	if err != nil {
+		t.Fatalf("use active credential: %v", err)
+	}
+	if used.APIKey != apiKey {
+		t.Fatalf("active API key = %q, want %q", used.APIKey, apiKey)
+	}
+}
+
 func TestAnthropicUsableKey(t *testing.T) {
 	t.Parallel()
 
@@ -192,6 +210,15 @@ func (s *memoryCredentialStore) Find(_ context.Context, keyID string) (Credentia
 		return CredentialRecord{}, ErrCredentialNotFound
 	}
 	return cloneCredential(credential), nil
+}
+
+func (s *memoryCredentialStore) FindActiveByUser(_ context.Context, userID string) (CredentialRecord, error) {
+	for _, credential := range s.credentials {
+		if credential.UserID == userID && credential.Enabled {
+			return cloneCredential(credential), nil
+		}
+	}
+	return CredentialRecord{}, ErrCredentialNotFound
 }
 
 func (s *memoryCredentialStore) Update(_ context.Context, credential CredentialRecord) error {

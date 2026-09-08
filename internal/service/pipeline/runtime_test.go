@@ -111,6 +111,22 @@ func TestAgentServiceInvokerResolvesAndBindsKeys(t *testing.T) {
 	}
 }
 
+func TestAgentServiceInvokerFailsWhenLLMIsRequiredButMissing(t *testing.T) {
+	invoker := AgentServiceInvoker{
+		Service:    &recordingAgentService{output: `{"ok":true}`},
+		RequireLLM: true,
+	}
+	taskInput := snapshotForTest(t, map[string]any{"user_id": "user-1", "prompt": "make a test scene"})
+	_, err := invoker.InvokeAgent(context.Background(), AgentRequest{
+		TaskID: "task-test", NodeID: NodeIntent, AgentID: "intent-agent", TaskInput: taskInput,
+		Dependencies: DependencyOutputs{NodeInitialize: taskInput},
+	})
+	var llmErr *agent.LLMError
+	if !errors.As(err, &llmErr) || llmErr.Code != agent.LLMNotConfigured {
+		t.Fatalf("expected LLM_NOT_CONFIGURED, got %v", err)
+	}
+}
+
 func TestShotPreviewStepsRejectsInvalidSpec(t *testing.T) {
 	_, err := (ShotPreviewSteps{}).InvokeStep(context.Background(), StepRequest{
 		NodeID: NodeValidateSpec, Step: string(NodeValidateSpec),
@@ -444,4 +460,3 @@ func (*e2eAgentService) GetRun(context.Context, string) (*agent.AgentRun, error)
 func (*e2eAgentService) Cancel(context.Context, string) error {
 	return errors.New("not implemented")
 }
-

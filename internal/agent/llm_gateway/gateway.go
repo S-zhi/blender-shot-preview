@@ -119,11 +119,18 @@ func (g *Gateway) Use(ctx context.Context, keyID, userID string) (UsableKey, err
 	}
 	userID = strings.TrimSpace(userID)
 	keyID = strings.TrimSpace(keyID)
-	if strings.TrimSpace(keyID) == "" {
-		return UsableKey{}, fmt.Errorf("%w: key ID is required", ErrInvalidCommand)
-	}
 
-	record, err := g.store.Find(ctx, keyID)
+	var record CredentialRecord
+	var err error
+	if keyID == "" {
+		selector, ok := g.store.(ActiveCredentialStore)
+		if !ok {
+			return UsableKey{}, ErrCredentialNotFound
+		}
+		record, err = selector.FindActiveByUser(ctx, userID)
+	} else {
+		record, err = g.store.Find(ctx, keyID)
+	}
 	if err != nil {
 		return UsableKey{}, err
 	}
@@ -270,6 +277,14 @@ type CredentialStore interface {
 	Find(ctx context.Context, keyID string) (CredentialRecord, error)
 	Update(ctx context.Context, credential CredentialRecord) error
 	Delete(ctx context.Context, keyID string) error
+}
+
+// ActiveCredentialStore is an optional query extension used when callers do
+// not provide an explicit key ID. Implementations should return one enabled
+// credential for the user using a deterministic policy (for example, newest
+// record first). Existing stores remain source-compatible without it.
+type ActiveCredentialStore interface {
+	FindActiveByUser(ctx context.Context, userID string) (CredentialRecord, error)
 }
 
 type CredentialRecord struct {
