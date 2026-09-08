@@ -98,11 +98,7 @@ func main() {
 
 	masterKey, err := newMasterKey()
 	if err != nil {
-		// Automatically generate a 32-byte master key for local development
-		masterKey = make([]byte, 32)
-		if _, randErr := rand.Read(masterKey); randErr != nil {
-			log.Fatal(randErr)
-		}
+		log.Fatal(err)
 	}
 	cipher, err := llm_gateway.NewAESGCMCipher(masterKey)
 	clear(masterKey)
@@ -151,11 +147,22 @@ func main() {
 	}
 }
 
-func newServer(manager llm_gateway.KeyManager) (server.Server, error) {
-	shotHandler := handlerv0_1.NewShotPreviewHandler(service.NewShotPreviewService(nil))
+func newServer(manager llm_gateway.KeyManager, opts ...server.Option) (server.Server, error) {
+	runner := buildPipelineRunner()
+	shotPreviewSvc := service.NewShotPreviewService(runner)
+	shotHandler := handlerv0_1.NewShotPreviewHandler(shotPreviewSvc)
 	keyHandler := handlerv0_1.NewLLMKeyHandler(service.NewLLMKeyService(manager))
 	assetHandler := handlerv0_1.NewAssetHandler(service.NewAssetService(nil))
-	svr := shotpreviewservicev0_1.NewServer(shotHandler)
+	return newServerWithHandlers(shotHandler, keyHandler, assetHandler, opts...)
+}
+
+func newServerWithHandlers(
+	shotHandler *handlerv0_1.ShotPreviewHandler,
+	keyHandler *handlerv0_1.LLMKeyHandler,
+	assetHandler *handlerv0_1.AssetHandler,
+	opts ...server.Option,
+) (server.Server, error) {
+	svr := shotpreviewservicev0_1.NewServer(shotHandler, opts...)
 	if err := llmkeyservicev0_1.RegisterService(svr, keyHandler); err != nil {
 		return nil, err
 	}
