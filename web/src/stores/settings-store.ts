@@ -80,6 +80,43 @@ const DEFAULT_PROVIDERS: ProviderItem[] = [
   },
 ];
 
+// Multiple open tabs can write the whole persisted Zustand state. Merge the
+// provider list at the storage boundary so an older tab cannot overwrite a
+// provider created in a newer tab with its stale default-only list.
+const settingsStorage: Storage = {
+  get length() {
+    return localStorage.length;
+  },
+  clear: () => localStorage.clear(),
+  getItem: (name) => localStorage.getItem(name),
+  key: (index) => localStorage.key(index),
+  removeItem: (name) => localStorage.removeItem(name),
+  setItem: (name, value) => {
+    try {
+      const incoming = JSON.parse(value);
+      const existing = JSON.parse(localStorage.getItem(name) || "null");
+      const existingProviders = existing?.state?.providers;
+      const incomingProviders = incoming?.state?.providers;
+
+      if (Array.isArray(existingProviders) && Array.isArray(incomingProviders)) {
+        const providers = new Map<string, ProviderItem>();
+        for (const provider of existingProviders) {
+          if (provider && typeof provider.id === "string") providers.set(provider.id, provider);
+        }
+        for (const provider of incomingProviders) {
+          if (provider && typeof provider.id === "string") providers.set(provider.id, provider);
+        }
+        incoming.state.providers = [...providers.values()];
+      }
+
+      localStorage.setItem(name, JSON.stringify(incoming));
+    } catch {
+      // Fall back to the normal write for malformed or unavailable storage.
+      localStorage.setItem(name, value);
+    }
+  },
+};
+
 export const useSettingsStore = create<SettingsState>()(
   persist(
     (set, get) => ({
@@ -285,7 +322,7 @@ export const useSettingsStore = create<SettingsState>()(
     }),
     {
       name: "bspe_settings_storage",
-      storage: createJSONStorage(() => localStorage),
+      storage: createJSONStorage(() => settingsStorage),
       partialize: (state) => ({
         userId: state.userId,
         providers: state.providers,
