@@ -3,6 +3,7 @@ import { ArrowUp, Square, Paperclip, Cpu, Sparkles } from "lucide-react";
 import clsx from "clsx";
 import { useConversationStore } from "#/stores/conversation-store";
 import { useSettingsStore } from "#/stores/settings-store";
+import { useNavigationStore } from "#/stores/navigation-store";
 import { LLMProvider } from "#/api/types";
 
 interface InputBoxProps {
@@ -17,7 +18,8 @@ export const InputBox: React.FC<InputBoxProps> = ({
   const [content, setContent] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { sendMessage, isGenerating, stopGenerating } = useConversationStore();
-  const { provider, modelName, setModalOpen } = useSettingsStore();
+  const { provider, modelName } = useSettingsStore();
+  const { setActiveView } = useNavigationStore();
 
   useEffect(() => {
     if (initialPrompt) {
@@ -78,7 +80,7 @@ export const InputBox: React.FC<InputBoxProps> = ({
             {/* Model Badge */}
             <button
               type="button"
-              onClick={() => setModalOpen(true)}
+              onClick={() => setActiveView("settings")}
               title="切换模型 / 配置 LLM Key"
               className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-surface-background hover:bg-surface-divider text-content-muted hover:text-content border border-border transition-colors cursor-pointer"
             >

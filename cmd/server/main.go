@@ -11,6 +11,7 @@ import (
 	llm_gateway "github.com/S-zhi/blender-shot-preview/internal/agent/llm_gateway"
 	handlerv0_1 "github.com/S-zhi/blender-shot-preview/internal/handler/v0_1"
 	"github.com/S-zhi/blender-shot-preview/internal/service"
+	"github.com/S-zhi/blender-shot-preview/kitex_gen/handler/v0_1/assetservicev0_1"
 	"github.com/S-zhi/blender-shot-preview/kitex_gen/handler/v0_1/llmkeyservicev0_1"
 	"github.com/S-zhi/blender-shot-preview/kitex_gen/handler/v0_1/shotpreviewservicev0_1"
 	"github.com/cloudwego/kitex/server"
@@ -101,8 +102,12 @@ func main() {
 func newServer(manager llm_gateway.KeyManager) (server.Server, error) {
 	handler := handlerv0_1.NewShotPreviewHandler(service.NewShotPreviewService(nil))
 	keyHandler := handlerv0_1.NewLLMKeyHandler(service.NewLLMKeyService(manager))
+	assetHandler := handlerv0_1.NewAssetHandler(service.NewAssetService(nil))
 	svr := shotpreviewservicev0_1.NewServer(handler)
 	if err := llmkeyservicev0_1.RegisterService(svr, keyHandler); err != nil {
+		return nil, err
+	}
+	if err := assetservicev0_1.RegisterService(svr, assetHandler); err != nil {
 		return nil, err
 	}
 	return svr, nil
