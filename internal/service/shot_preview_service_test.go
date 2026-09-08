@@ -23,15 +23,16 @@ func TestShotPreviewServiceSubmitsIdempotentAsyncPipeline(t *testing.T) {
 		}),
 	)
 	service := NewShotPreviewService(runner)
-	firstID, firstStatus, err := service.SubmitTask(context.Background(), "user-1", "A moonlit city shot", "conversation-1", "request-1")
-	if err != nil || firstStatus != TaskStatusAccepted || firstID == "" {
-		t.Fatalf("first SubmitTask() = id=%q status=%v err=%v", firstID, firstStatus, err)
+	request := CreateTaskRequest{UserID: "user-1", Prompt: "A moonlit city shot", ConversationID: "conversation-1", RequestID: "request-1"}
+	first, err := service.CreateTask(context.Background(), request)
+	if err != nil || first.Status != CreateStatusAccepted || first.TaskID == "" || first.Replayed {
+		t.Fatalf("first CreateTask() = %#v err=%v", first, err)
 	}
-	secondID, secondStatus, err := service.SubmitTask(context.Background(), "user-1", "A moonlit city shot", "conversation-1", "request-1")
-	if err != nil || secondStatus != TaskStatusAccepted || secondID != firstID {
-		t.Fatalf("second SubmitTask() = id=%q status=%v err=%v", secondID, secondStatus, err)
+	second, err := service.CreateTask(context.Background(), request)
+	if err != nil || second.Status != CreateStatusAccepted || second.TaskID != first.TaskID || !second.Replayed {
+		t.Fatalf("second CreateTask() = %#v err=%v", second, err)
 	}
-	task := waitForPipelineTask(t, runner, firstID)
+	task := waitForPipelineTask(t, runner, first.TaskID)
 	if task.Status != pipeline.TaskStatusSucceeded || len(task.Nodes) != 13 {
 		t.Fatalf("pipeline task = %#v, want successful 13-stage task", task)
 	}
@@ -39,18 +40,21 @@ func TestShotPreviewServiceSubmitsIdempotentAsyncPipeline(t *testing.T) {
 
 func TestShotPreviewServiceRejectsIncompleteTask(t *testing.T) {
 	service := NewShotPreviewService(nil)
-	if _, status, err := service.SubmitTask(context.Background(), "", "shot", "", "request-1"); err != ErrRejected || status != TaskStatusRejected {
-		t.Fatalf("empty user result = status=%v err=%v", status, err)
+	if result, err := service.CreateTask(context.Background(), CreateTaskRequest{Prompt: "shot", RequestID: "request-1"}); err != ErrInvalidTaskRequest || result.Status != CreateStatusRejected {
+		t.Fatalf("empty user result = result=%#v err=%v", result, err)
 	}
-	if _, status, err := service.SubmitTask(context.Background(), "user-1", "shot", "", ""); err != ErrRejected || status != TaskStatusRejected {
-		t.Fatalf("empty request ID result = status=%v err=%v", status, err)
+	if result, err := service.CreateTask(context.Background(), CreateTaskRequest{UserID: "user-1", Prompt: "shot"}); err != ErrInvalidTaskRequest || result.Status != CreateStatusRejected {
+		t.Fatalf("empty request ID result = result=%#v err=%v", result, err)
+	}
+	if result, err := service.CreateTask(context.Background(), CreateTaskRequest{UserID: "user-1", Prompt: "shot", RequestID: "request-1", WorkflowID: "arbitrary-dag"}); err != ErrInvalidTaskRequest || result.Status != CreateStatusRejected {
+		t.Fatalf("unsupported workflow result = result=%#v err=%v", result, err)
 	}
 }
 
 func TestShotPreviewServiceRejectsUnavailablePipeline(t *testing.T) {
 	service := NewShotPreviewService(nil)
-	if _, status, err := service.SubmitTask(context.Background(), "user-1", "shot", "", "request-1"); err != ErrPipelineUnavailable || status != TaskStatusRejected {
-		t.Fatalf("unavailable pipeline result = status=%v err=%v", status, err)
+	if result, err := service.CreateTask(context.Background(), CreateTaskRequest{UserID: "user-1", Prompt: "shot", RequestID: "request-1"}); err != ErrPipelineUnavailable || result.Status != CreateStatusRejected {
+		t.Fatalf("unavailable pipeline result = result=%#v err=%v", result, err)
 	}
 }
 

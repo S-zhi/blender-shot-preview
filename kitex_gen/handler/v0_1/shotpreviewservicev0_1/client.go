@@ -12,6 +12,9 @@ import (
 // Client is designed to provide IDL-compatible methods with call-option parameter for kitex framework.
 type Client interface {
 	CreateShotPreviewTask(ctx context.Context, request *v0_1.CreateShotPreviewTaskRequest, callOptions ...callopt.Option) (r *v0_1.CreateShotPreviewTaskResponse, err error)
+	GetShotPreviewTask(ctx context.Context, request *v0_1.GetShotPreviewTaskRequest, callOptions ...callopt.Option) (r *v0_1.GetShotPreviewTaskResponse, err error)
+	CancelShotPreviewTask(ctx context.Context, request *v0_1.CancelShotPreviewTaskRequest, callOptions ...callopt.Option) (r *v0_1.CancelShotPreviewTaskResponse, err error)
+	RetryShotPreviewTask(ctx context.Context, request *v0_1.RetryShotPreviewTaskRequest, callOptions ...callopt.Option) (r *v0_1.RetryShotPreviewTaskResponse, err error)
 }
 
 // NewClient creates a client for the service defined in IDL.
@@ -46,4 +49,19 @@ type kShotPreviewServiceV0_1Client struct {
 func (p *kShotPreviewServiceV0_1Client) CreateShotPreviewTask(ctx context.Context, request *v0_1.CreateShotPreviewTaskRequest, callOptions ...callopt.Option) (r *v0_1.CreateShotPreviewTaskResponse, err error) {
 	ctx = client.NewCtxWithCallOptions(ctx, callOptions)
 	return p.kClient.CreateShotPreviewTask(ctx, request)
+}
+
+func (p *kShotPreviewServiceV0_1Client) GetShotPreviewTask(ctx context.Context, request *v0_1.GetShotPreviewTaskRequest, callOptions ...callopt.Option) (r *v0_1.GetShotPreviewTaskResponse, err error) {
+	ctx = client.NewCtxWithCallOptions(ctx, callOptions)
+	return p.kClient.GetShotPreviewTask(ctx, request)
+}
+
+func (p *kShotPreviewServiceV0_1Client) CancelShotPreviewTask(ctx context.Context, request *v0_1.CancelShotPreviewTaskRequest, callOptions ...callopt.Option) (r *v0_1.CancelShotPreviewTaskResponse, err error) {
+	ctx = client.NewCtxWithCallOptions(ctx, callOptions)
+	return p.kClient.CancelShotPreviewTask(ctx, request)
+}
+
+func (p *kShotPreviewServiceV0_1Client) RetryShotPreviewTask(ctx context.Context, request *v0_1.RetryShotPreviewTaskRequest, callOptions ...callopt.Option) (r *v0_1.RetryShotPreviewTaskResponse, err error) {
+	ctx = client.NewCtxWithCallOptions(ctx, callOptions)
+	return p.kClient.RetryShotPreviewTask(ctx, request)
 }
