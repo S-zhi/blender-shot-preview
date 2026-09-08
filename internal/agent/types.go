@@ -4,6 +4,8 @@ package agent
 import (
 	"encoding/json"
 	"time"
+
+	"github.com/cloudwego/eino/components/model"
 )
 
 type AgentStatus string
@@ -65,6 +67,10 @@ type AgentRequest struct {
 	// SkillIDs is reserved for request-scoped skill selection. Dynamic skills
 	// remain disabled until the authorization policy in issue #6 is implemented.
 	SkillIDs []string
+
+	// Model allows callers to explicitly bind a ChatModel at the request boundary.
+	// When provided, it takes precedence over the agent definition's ModelProfile.
+	Model model.BaseChatModel
 }
 
 type AgentResult struct {
